@@ -202,12 +202,17 @@ def format_matches(matches: list, hero_map: dict) -> str:
 
 def format_search(results: list) -> str:
     lines = ["<b>Результати пошуку:</b>\n━━━━━━━━━━━━━━━"]
+
     for p in results[:5]:
-        name = escape(p.get("personaname", "Невідомо"))
-        account_id = p.get("account_id")
-        similarity = round(p.get("similarity", 0) * 100)
+        name = escape(p.get("personaname") or "Невідомо")
+        account_id = str(p.get("account_id") or "—")
+        rank = get_medal(p.get("rank_tier"))
+
+        name_padded = name[:16].ljust(17)
+        id_padded = account_id.rjust(10)
+
         lines.append(
-            f"👤 <b>{name}</b>\n"
-            f"🆔 <code>{account_id}</code> | {similarity}% збіг"
+            f"👤 <code>{name_padded}{id_padded}</code>  {rank}"
         )
+
     return "\n\n".join(lines) + f"\n\n{BRAND_EMOJI} <b>{BRAND_NAME}</b>"
