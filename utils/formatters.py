@@ -74,7 +74,7 @@ def get_hero_emoji(name: str) -> str:
     return "🎮"
 
 
-GOLD_EMOJI = '<tg-emoji emoji-id="5364344020183037021">💰 </tg-emoji>'
+GOLD_EMOJI = '<tg-emoji emoji-id="5364344020183037021">💰</tg-emoji> '
 
 
 def format_match(match: dict, hero_map: dict) -> str:

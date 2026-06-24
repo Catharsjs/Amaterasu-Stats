@@ -143,6 +143,12 @@ async def handle_player_query(message: Message, state: FSMContext):
         await msg.edit_text(format_search(results), parse_mode="HTML")
 
 
+@router.message(SearchState.waiting_for_stats)
+async def handle_stats_query(message: Message, state: FSMContext):
+    # Reuse the same flow as the menu player search: numeric input opens stats, text input searches by nickname.
+    await handle_player_query(message, state)
+
+
 @router.message(SearchState.waiting_for_match)
 async def handle_match_query(message: Message, state: FSMContext):
     await state.clear()
@@ -257,6 +263,13 @@ async def cmd_matches(message: Message):
     )
 
 
+# /clear
+@router.message(Command("clear"))
+async def cmd_clear(message: Message, state: FSMContext):
+    await state.clear()
+    await message.answer("✅ Стан очищено. Можеш ввести нову команду.")
+
+
 # /search
 @router.message(Command("search"))
 async def cmd_search(message: Message):
@@ -307,12 +320,10 @@ async def cmd_match(message: Message, state: FSMContext):
         await msg.edit_text("❌ Матч не знайдено. Перевір ID.", parse_mode="HTML")
         return
 
-    text, keyboard = format_match(match_data, hero_map)
     await msg.edit_text(
-        text,
+        format_match(match_data, hero_map),
         parse_mode="HTML",
-        disable_web_page_preview=True,
-        reply_markup=keyboard
+        disable_web_page_preview=True
     )
 
 # Inline — сигнатурні герої
