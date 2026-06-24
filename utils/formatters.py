@@ -28,8 +28,8 @@ def get_medal(rank_tier: int | None) -> str:
             emoji_id = "5194917400125907991"
 
     medal_emoji = f'<tg-emoji emoji-id="{emoji_id}">🏆</tg-emoji>'
-    stars_str = "★" * stars if stars and tier < 8 else ""
-    return f"{medal_emoji} {name} {stars_str}".strip()
+    return f"{medal_emoji} {name}".strip()
+
 
 
 def get_rank_emoji(rank_tier: int | None) -> str:
