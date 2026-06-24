@@ -3,15 +3,24 @@ import time
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from html import escape
 
 from services.opendota import (
     get_player, get_player_wl, get_player_heroes,
-    get_recent_matches, search_player, get_heroes
+    get_recent_matches, search_player, get_heroes,
+    get_match
 )
-from utils.formatters import format_player_stats, format_heroes, format_matches, format_search
+from utils.formatters import format_player_stats, format_heroes, format_matches, format_search, format_match
 from config import ERR_INVALID_ID, ERR_PLAYER_NOT_FOUND, ERR_API_UNAVAILABLE, ERR_NO_RESULTS, BRAND_EMOJI, BRAND_NAME
 
 router = Router()
+
+class SearchState(StatesGroup):
+    waiting_for_query = State()
+    waiting_for_match = State()
+
 _hero_map: dict = {}
 _stats_cache: dict = {}
 CACHE_TTL = 600  # 10 хвилин
@@ -73,17 +82,85 @@ def back_keyboard(account_id: int) -> InlineKeyboardMarkup:
 # /start
 @router.message(Command("start"))
 async def cmd_start(message: Message):
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🔍 Шукати гравця", callback_data="prompt_player"),
+            InlineKeyboardButton(text="🎮 Шукати матч", callback_data="prompt_match"),
+        ]
+    ])
     await message.answer(
-        "👋 <b>Amaterasu Esports Stats</b>\n"
-        "━━━━━━━━━━━━━━━\n"
-        "Статистика Dota 2 прямо в Telegram\n\n"
-        "📌 <b>Команди:</b>\n"
-        "/stats <code>ID</code> — статистика гравця\n"
-        "/heroes <code>ID</code> — сигнатурні герої\n"
-        "/matches <code>ID</code> — останні матчі\n"
-        "/search <code>нікнейм</code> — пошук гравця\n\n"
-        "💡 Не знаєш свій ID? Використай /search",
-        parse_mode="HTML"
+        f'<tg-emoji emoji-id="5321247751399316518">⚛️</tg-emoji> <b>Amaterasu Esports Stats</b>\n'
+        f"━━━━━━━━━━━━━━━\n"
+        f"Статистика Dota 2 прямо в Telegram\n\n"
+        f"📌 <b>Команди:</b>\n"
+        f"/stats <code>ID</code> — статистика гравця\n"
+        f"/heroes <code>ID</code> — сигнатурні герої\n"
+        f"/matches <code>ID</code> — останні матчі\n"
+        f"/match <code>ID</code> — деталі конкретного матчу\n"
+        f"/search <code>нікнейм</code> — пошук гравця\n\n"
+        f"💡 Не знаєш свій ID? Використай /search",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+
+
+@router.callback_query(F.data == "prompt_player")
+async def cb_prompt_player(call: CallbackQuery, state: FSMContext):
+    await call.answer()
+    await call.message.answer("👤 Введіть ID або Nickname гравця:")
+    await state.set_state(SearchState.waiting_for_query)
+
+
+@router.callback_query(F.data == "prompt_match")
+async def cb_prompt_match(call: CallbackQuery, state: FSMContext):
+    await call.answer()
+    await call.message.answer("🎮 Введіть ID матчу:")
+    await state.set_state(SearchState.waiting_for_match)
+
+
+@router.message(SearchState.waiting_for_query)
+async def handle_player_query(message: Message, state: FSMContext):
+    await state.clear()
+    query = message.text.strip()
+    if query.isdigit():
+        msg = await message.answer("⏳ Завантажую...")
+        player, wl = await get_cached_stats(int(query))
+        if not player or "profile" not in player:
+            await msg.edit_text(ERR_PLAYER_NOT_FOUND, parse_mode="HTML")
+            return
+        await msg.edit_text(
+            format_player_stats(player, wl or {}),
+            parse_mode="HTML",
+            reply_markup=stats_keyboard(int(query))
+        )
+    else:
+        msg = await message.answer(f"🔍 Шукаю <b>{escape(query)}</b>...", parse_mode="HTML")
+        results = await search_player(query)
+        if not results:
+            await msg.edit_text(ERR_NO_RESULTS, parse_mode="HTML")
+            return
+        await msg.edit_text(format_search(results), parse_mode="HTML")
+
+
+@router.message(SearchState.waiting_for_match)
+async def handle_match_query(message: Message, state: FSMContext):
+    await state.clear()
+    query = message.text.strip()
+    if not query.isdigit():
+        await message.answer("⚠️ ID матчу має бути числом", parse_mode="HTML")
+        return
+    msg = await message.answer("⏳ Завантажую матч...")
+    match_data, hero_map = await asyncio.gather(
+        get_match(int(query)),
+        load_heroes()
+    )
+    if not match_data:
+        await msg.edit_text("❌ Матч не знайдено.", parse_mode="HTML")
+        return
+    await msg.edit_text(
+        format_match(match_data, hero_map),
+        parse_mode="HTML",
+        disable_web_page_preview=True
     )
 
 
@@ -193,6 +270,37 @@ async def cmd_search(message: Message):
 
     await msg.edit_text(format_search(results), parse_mode="HTML")
 
+# /match
+@router.message(Command("match"))
+async def cmd_match(message: Message):
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2 or not args[1].strip().isdigit():
+        await message.answer(
+            "⚠️ Вкажи ID матчу:\n<code>/match 8863808680</code>",
+            parse_mode="HTML"
+        )
+        return
+
+    match_id = int(args[1].strip())
+    msg = await message.answer("⏳ Завантажую матч...")
+
+    match_data, hero_map = await asyncio.gather(
+        get_match(match_id),
+        load_heroes()
+    )
+
+    if not match_data:
+        await msg.edit_text(
+            "❌ Матч не знайдено. Перевір ID.",
+            parse_mode="HTML"
+        )
+        return
+
+    await msg.edit_text(
+        format_match(match_data, hero_map),
+        parse_mode="HTML",
+        disable_web_page_preview=True
+    )
 
 # Inline — сигнатурні герої
 @router.callback_query(F.data.startswith("heroes:"))

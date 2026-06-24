@@ -50,6 +50,59 @@ def get_hero_emoji(name: str) -> str:
         return f'<tg-emoji emoji-id="{emoji_id}">🎮</tg-emoji>'
     return "🎮"
 
+GOLD_EMOJI = '<tg-emoji emoji-id="5364344020183037021">💰</tg-emoji>'
+
+
+def format_match(match: dict, hero_map: dict) -> str:
+    from html import escape
+
+    radiant_win = match.get("radiant_win", False)
+    duration = match.get("duration", 0)
+    mins = duration // 60
+    secs = duration % 60
+    match_id = match.get("match_id")
+    radiant_score = match.get("radiant_score", 0)
+    dire_score = match.get("dire_score", 0)
+
+    radiant_players = [p for p in match.get("players", []) if p.get("isRadiant")]
+    dire_players = [p for p in match.get("players", []) if not p.get("isRadiant")]
+
+    def format_player(p: dict) -> str:
+        name = escape(p.get("personaname") or "Player")
+        hero_id = p.get("hero_id")
+        hero_name = hero_map.get(hero_id, "Unknown")
+        hero_e = get_hero_emoji(hero_name)
+        rank = get_medal(p.get("rank_tier"))
+        k = p.get("kills", 0)
+        d = p.get("deaths", 0)
+        a = p.get("assists", 0)
+        nw = p.get("net_worth", 0)
+        account_id = p.get("account_id")
+        if account_id:
+            name_str = f'<a href="tg://btn/stats_{account_id}">{name}</a>'
+        else:
+            name_str = name
+        return f"{rank} {name_str} {hero_e} {k}/{d}/{a} {GOLD_EMOJI}{nw:,}"
+
+    radiant_label = "Radiant 🏆 Перемога" if radiant_win else "Radiant"
+    dire_label = "Dire 🏆 Перемога" if not radiant_win else "Dire"
+
+    radiant_lines = "\n".join(format_player(p) for p in radiant_players)
+    dire_lines = "\n".join(format_player(p) for p in dire_players)
+
+    return (
+        f"<b>Рахунок:</b> {radiant_score} : {dire_score}\n"
+        f"<b>Тривалість:</b> {mins:02d}:{secs:02d}\n"
+        f"<b>ID матчу:</b> <code>{match_id}</code>\n"
+        f"\n"
+        f"<b>{radiant_label}</b>\n"
+        f"{radiant_lines}\n"
+        f"\n"
+        f"<b>{dire_label}</b>\n"
+        f"{dire_lines}\n"
+        f"\n"
+        f"{BRAND_EMOJI} <b>{BRAND_NAME}</b>"
+    )
 
 def format_player_stats(profile: dict, wl: dict) -> str:
     name = escape(profile.get("profile", {}).get("personaname", "Невідомо"))
