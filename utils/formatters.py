@@ -1,8 +1,13 @@
 from html import escape
+
 from config import (
-    BRAND_EMOJI, BRAND_NAME,
-    DOTA_LOGO, MEDAL_MAP,
-    MAX_HEROES, MAX_MATCHES, HERO_EMOJI
+    BRAND_EMOJI,
+    BRAND_NAME,
+    DOTA_LOGO,
+    MEDAL_MAP,
+    MAX_HEROES,
+    MAX_MATCHES,
+    HERO_EMOJI,
 )
 
 
@@ -29,7 +34,6 @@ def get_medal(rank_tier: int | None) -> str:
 
     medal_emoji = f'<tg-emoji emoji-id="{emoji_id}">🏆</tg-emoji>'
     return f"{medal_emoji} {name}".strip()
-
 
 
 def get_rank_emoji(rank_tier: int | None) -> str:
@@ -59,19 +63,33 @@ def get_rank_emoji(rank_tier: int | None) -> str:
 def wr_emoji(wr: float) -> str:
     if wr < 45:
         return "🔴"
-    elif wr < 50:
+    if wr < 50:
         return "🟠"
-    elif wr < 55:
+    if wr < 55:
         return "🟢"
-    else:
-        return "🟣"
+    return "🟣"
 
 
 def get_hero_emoji(name: str) -> str:
     emoji_id = HERO_EMOJI.get(name)
+
     if emoji_id:
         return f'<tg-emoji emoji-id="{emoji_id}">🎮</tg-emoji>'
+
     return "🎮"
+
+
+def short_hero_name(hero_name: str, max_len: int = 14) -> str:
+    aliases = {
+        "Nature's Prophet": "Nature's Prophet",
+    }
+
+    name = aliases.get(hero_name, hero_name)
+
+    if len(name) <= max_len:
+        return name
+
+    return name[:max_len]
 
 
 GOLD_EMOJI = '<tg-emoji emoji-id="5364344020183037021">💰</tg-emoji> '
@@ -95,6 +113,7 @@ def format_match(match: dict, hero_map: dict) -> str:
         hero_name = hero_map.get(hero_id, "Unknown")
         hero_e = get_hero_emoji(hero_name)
         rank = get_rank_emoji(p.get("rank_tier"))
+
         k = p.get("kills", 0)
         d = p.get("deaths", 0)
         a = p.get("assists", 0)
@@ -104,7 +123,11 @@ def format_match(match: dict, hero_map: dict) -> str:
         kda = f"{k}/{d}/{a}".ljust(9)
         nw_str = f"{nw:,}"
 
-        return f"{rank} {hero_e} <code>{name_padded}{kda}</code>{GOLD_EMOJI}<code>{nw_str}</code>"
+        return (
+            f"{rank} {hero_e} "
+            f"<code>{name_padded}{kda}</code>"
+            f"{GOLD_EMOJI}<code>{nw_str}</code>"
+        )
 
     radiant_label = "Radiant 🏆 Перемога" if radiant_win else "Radiant"
     dire_label = "Dire 🏆 Перемога" if not radiant_win else "Dire"
@@ -164,39 +187,61 @@ def format_player_stats(profile: dict, wl: dict) -> str:
 
 def format_heroes(heroes: list, hero_map: dict) -> str:
     heroes = [h for h in heroes if h.get("games", 0) > 0]
+
     if not heroes:
         return (
             f"<i>Інформація недоступна — гравець вимкнув поширення історії матчів</i>\n\n"
             f"{BRAND_EMOJI} <b>{BRAND_NAME}</b>"
         )
+
     lines = ["<b>Сигнатурні герої:</b>\n━━━━━━━━━━━━━━━"]
+
     for h in heroes[:MAX_HEROES]:
-        name = escape(hero_map.get(h.get("hero_id"), "Невідомо"))
+        raw_name = hero_map.get(h.get("hero_id"), "Невідомо")
+        name = escape(short_hero_name(raw_name, 16))
+
         games = h.get("games", 0)
         wins = h.get("win", 0)
         wr = round(wins / games * 100, 1) if games else 0
         indicator = wr_emoji(wr)
+
         name_padded = name[:16].ljust(17)
         games_padded = str(games).rjust(4)
+
         lines.append(
-            f"{get_hero_emoji(name)} <code>{name_padded}{games_padded} матчів  {indicator}{wr:5.1f}%</code>"
+            f"{get_hero_emoji(raw_name)} "
+            f"<code>{name_padded}{games_padded} матчів  {indicator}{wr:5.1f}%</code>"
         )
+
     return "\n\n".join(lines) + f"\n\n{BRAND_EMOJI} <b>{BRAND_NAME}</b>"
 
 
 def format_matches(matches: list, hero_map: dict) -> str:
     lines = ["<b>Останні матчі:</b>\n━━━━━━━━━━━━━━━"]
+
     for m in matches[:MAX_MATCHES]:
-        hero = escape(hero_map.get(m.get("hero_id"), "Невідомо"))
+        raw_hero = hero_map.get(m.get("hero_id"), "Невідомо")
+
+        hero_emoji = get_hero_emoji(raw_hero)
+        hero_name = escape(short_hero_name(raw_hero, 16))
+
         won = m.get("radiant_win") == (m.get("player_slot", 0) < 128)
         result = "✅" if won else "❌"
+
         kda = f"{m.get('kills', 0)}/{m.get('deaths', 0)}/{m.get('assists', 0)}"
         mins = m.get("duration", 0) // 60
         match_id = m.get("match_id")
+
+        hero_padded = hero_name[:16].ljust(17)
+        kda_padded = kda.ljust(9)
+        mins_padded = f"{mins}хв".rjust(5)
+
         lines.append(
-            f"{result} {get_hero_emoji(hero)} <code>{hero[:14].ljust(15)}{kda.ljust(9)}{mins}хв</code>  "
+            f"{result} {hero_emoji} "
+            f"<code>{hero_padded}{kda_padded}{mins_padded}</code>  "
             f"<a href='https://www.opendota.com/matches/{match_id}'>{match_id}</a>"
         )
+
     return "\n\n".join(lines) + f"\n\n{BRAND_EMOJI} <b>{BRAND_NAME}</b>"
 
 

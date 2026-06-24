@@ -1,46 +1,97 @@
 import asyncio
 import time
+from html import escape
+
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from html import escape
 
 from services.opendota import (
     get_player, get_player_wl, get_player_heroes,
     get_recent_matches, search_player, get_heroes,
     get_match
 )
-from utils.formatters import format_player_stats, format_heroes, format_matches, format_search, format_match
-from config import ERR_INVALID_ID, ERR_PLAYER_NOT_FOUND, ERR_API_UNAVAILABLE, ERR_NO_RESULTS, BRAND_EMOJI, BRAND_NAME
+from utils.formatters import (
+    format_player_stats,
+    format_heroes,
+    format_matches,
+    format_search,
+    format_match
+)
+from config import (
+    ERR_INVALID_ID,
+    ERR_PLAYER_NOT_FOUND,
+    ERR_NO_RESULTS,
+    BRAND_EMOJI,
+    BRAND_NAME
+)
 
 router = Router()
+
 
 class SearchState(StatesGroup):
     waiting_for_query = State()
     waiting_for_match = State()
     waiting_for_stats = State()
 
+
 _hero_map: dict = {}
 _stats_cache: dict = {}
-CACHE_TTL = 600  # 10 хвилин
+_search_cache: dict = {}
+
+CACHE_TTL = 600
+SEARCH_CACHE_TTL = 600
+
+
+def normalize_name(value: str) -> str:
+    return (value or "").strip().lower()
+
+
+def rank_search_results(results: list, query: str) -> list:
+    q = normalize_name(query)
+
+    def score(player: dict) -> tuple:
+        name = normalize_name(player.get("personaname"))
+
+        if name == q:
+            return (0, name)
+        if name.startswith(q):
+            return (1, name)
+        if q in name:
+            return (2, name)
+
+        return (3, name)
+
+    filtered = [
+        player for player in results
+        if q in normalize_name(player.get("personaname"))
+    ]
+
+    return sorted(filtered, key=score)[:5]
 
 
 async def load_heroes() -> dict:
     global _hero_map
+
     if not _hero_map:
         heroes = await get_heroes()
         if heroes:
-            _hero_map = {h["id"]: h["localized_name"] for h in heroes}
+            _hero_map = {
+                h["id"]: h["localized_name"]
+                for h in heroes
+            }
+
     return _hero_map
 
 
 async def get_cached_stats(account_id: int):
     import logging
     logger = logging.getLogger(__name__)
-    
+
     now = time.time()
+
     if account_id in _stats_cache:
         cached, ts = _stats_cache[account_id]
         if now - ts < CACHE_TTL:
@@ -48,14 +99,19 @@ async def get_cached_stats(account_id: int):
             return cached
 
     logger.info(f"Fetching player {account_id}...")
-    player = await get_player(account_id)
-    logger.info(f"Player done: {account_id}")
-    wl = await get_player_wl(account_id)
-    logger.info(f"WL done: {account_id}")
+
+    player, wl = await asyncio.gather(
+        get_player(account_id),
+        get_player_wl(account_id)
+    )
+
+    logger.info(f"Player stats done: {account_id}")
 
     result = (player, wl)
     _stats_cache[account_id] = (result, now)
+
     return result
+
 
 async def enrich_search_results_with_rank(results: list) -> list:
     top_results = results[:5]
@@ -65,46 +121,80 @@ async def enrich_search_results_with_rank(results: list) -> list:
         if not account_id:
             return player
 
-        full_player = await get_player(int(account_id))
-        if full_player:
-            player["rank_tier"] = full_player.get("rank_tier")
-            player["leaderboard_rank"] = full_player.get("leaderboard_rank")
+        cached_stats = _stats_cache.get(int(account_id))
+        if cached_stats:
+            player_data, _ = cached_stats[0]
+        else:
+            player_data = await get_player(int(account_id))
+
+        if player_data:
+            player["rank_tier"] = player_data.get("rank_tier")
+            player["leaderboard_rank"] = player_data.get("leaderboard_rank")
 
         return player
 
-    return await asyncio.gather(*(enrich(p) for p in top_results))
+    return await asyncio.gather(*(enrich(player) for player in top_results))
 
-def is_private(wl: dict) -> bool:
-    return wl.get("win", 0) + wl.get("lose", 0) == 0
+
+async def search_player_fast(query: str) -> list:
+    now = time.time()
+    cache_key = normalize_name(query)
+
+    if cache_key in _search_cache:
+        cached, ts = _search_cache[cache_key]
+        if now - ts < SEARCH_CACHE_TTL:
+            return cached
+
+    results = await search_player(query)
+
+    if not results:
+        return []
+
+    results = rank_search_results(results, query)
+
+    if not results:
+        return []
+
+    results = await enrich_search_results_with_rank(results)
+
+    _search_cache[cache_key] = (results, now)
+
+    return results
 
 
 PRIVATE_MSG = (
-    f"ℹ️ <i>Інформація недоступна — гравець вимкнув поширення історії матчів</i>"
+    "ℹ️ <i>Інформація недоступна — гравець вимкнув поширення історії матчів</i>"
 )
 
 
 def stats_keyboard(account_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="Сигнатурні герої", callback_data=f"heroes:{account_id}"),
-        InlineKeyboardButton(text="Останні матчі", callback_data=f"matches:{account_id}"),
-    ]])
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="Сигнатурні герої", callback_data=f"heroes:{account_id}"),
+            InlineKeyboardButton(text="Останні матчі", callback_data=f"matches:{account_id}"),
+        ]
+    ])
 
 
 def back_keyboard(account_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="◀️ Повернутись", callback_data=f"stats:{account_id}"),
-    ]])
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="◀️ Повернутись", callback_data=f"stats:{account_id}"),
+        ]
+    ])
 
 
-# /start
 @router.message(Command("start"))
-async def cmd_start(message: Message):
+async def cmd_start(message: Message, state: FSMContext):
+    await state.clear()
+
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="🔍 Шукати гравця", callback_data="prompt_player"),
             InlineKeyboardButton(text="🎮 Шукати матч", callback_data="prompt_match"),
         ]
     ])
+
     await message.answer(
         f'<tg-emoji emoji-id="5321247751399316518">⚛️</tg-emoji> <b>Amaterasu Esports Stats</b>\n'
         f"━━━━━━━━━━━━━━━\n"
@@ -114,7 +204,7 @@ async def cmd_start(message: Message):
         f"/stats <code>ID</code> — статистика гравця\n"
         f"/match <code>ID</code> — деталі конкретного матчу\n"
         f"/search <code>нікнейм</code> — пошук гравця\n\n"
-        f"💡 Не знаєш свій ID? Використай /search",
+        f"💡 Сигнатурні герої та останні матчі доступні зі сторінки гравця",
         parse_mode="HTML",
         reply_markup=keyboard
     )
@@ -136,53 +226,76 @@ async def cb_prompt_match(call: CallbackQuery, state: FSMContext):
 
 @router.message(SearchState.waiting_for_query)
 async def handle_player_query(message: Message, state: FSMContext):
-    await state.clear()
     query = message.text.strip()
+
+    if query.startswith("/"):
+        return
+
+    await state.clear()
+
     if query.isdigit():
+        account_id = int(query)
         msg = await message.answer("⏳ Завантажую...")
-        player, wl = await get_cached_stats(int(query))
+
+        player, wl = await get_cached_stats(account_id)
+
         if not player or "profile" not in player:
             await msg.edit_text(ERR_PLAYER_NOT_FOUND, parse_mode="HTML")
             return
+
         await msg.edit_text(
             format_player_stats(player, wl or {}),
             parse_mode="HTML",
-            reply_markup=stats_keyboard(int(query))
+            reply_markup=stats_keyboard(account_id)
         )
-    else:
-        msg = await message.answer(f"🔍 Шукаю <b>{escape(query)}</b>...", parse_mode="HTML")
-        results = await search_player(query)
+        return
+
+    msg = await message.answer(
+        f"🔍 Шукаю <b>{escape(query)}</b>...",
+        parse_mode="HTML"
+    )
+
+    results = await search_player_fast(query)
 
     if not results:
         await msg.edit_text(ERR_NO_RESULTS, parse_mode="HTML")
         return
 
-    results = await enrich_search_results_with_rank(results)
-
-    await msg.edit_text(format_search(results), parse_mode="HTML")
+    await msg.edit_text(
+        format_search(results),
+        parse_mode="HTML"
+    )
 
 
 @router.message(SearchState.waiting_for_stats)
 async def handle_stats_query(message: Message, state: FSMContext):
-    # Reuse the same flow as the menu player search: numeric input opens stats, text input searches by nickname.
     await handle_player_query(message, state)
 
 
 @router.message(SearchState.waiting_for_match)
 async def handle_match_query(message: Message, state: FSMContext):
-    await state.clear()
     query = message.text.strip()
+
+    if query.startswith("/"):
+        return
+
+    await state.clear()
+
     if not query.isdigit():
         await message.answer("⚠️ ID матчу має бути числом", parse_mode="HTML")
         return
+
     msg = await message.answer("⏳ Завантажую матч...")
+
     match_data, hero_map = await asyncio.gather(
         get_match(int(query)),
         load_heroes()
     )
+
     if not match_data:
         await msg.edit_text("❌ Матч не знайдено.", parse_mode="HTML")
         return
+
     await msg.edit_text(
         format_match(match_data, hero_map),
         parse_mode="HTML",
@@ -190,22 +303,26 @@ async def handle_match_query(message: Message, state: FSMContext):
     )
 
 
-# /stats
 @router.message(Command("stats"))
 async def cmd_stats(message: Message, state: FSMContext):
+    await state.clear()
+
     args = message.text.split(maxsplit=1)
+
     if len(args) < 2:
         await message.answer("👤 Введіть ID або Nickname гравця:")
         await state.set_state(SearchState.waiting_for_stats)
         return
 
-    account_id_str = args[1].strip()
-    if not account_id_str.isdigit():
+    query = args[1].strip()
+
+    if not query.isdigit():
         await message.answer(ERR_INVALID_ID, parse_mode="HTML")
         return
 
-    account_id = int(account_id_str)
+    account_id = int(query)
     msg = await message.answer("⏳ Завантажую...")
+
     player, wl = await get_cached_stats(account_id)
 
     if not player or "profile" not in player:
@@ -219,10 +336,10 @@ async def cmd_stats(message: Message, state: FSMContext):
     )
 
 
-# /heroes
 @router.message(Command("heroes"))
 async def cmd_heroes(message: Message):
     args = message.text.split(maxsplit=1)
+
     if len(args) < 2 or not args[1].strip().isdigit():
         await message.answer(ERR_INVALID_ID, parse_mode="HTML")
         return
@@ -250,10 +367,10 @@ async def cmd_heroes(message: Message):
     )
 
 
-# /matches
 @router.message(Command("matches"))
 async def cmd_matches(message: Message):
     args = message.text.split(maxsplit=1)
+
     if len(args) < 2 or not args[1].strip().isdigit():
         await message.answer(ERR_INVALID_ID, parse_mode="HTML")
         return
@@ -282,17 +399,10 @@ async def cmd_matches(message: Message):
     )
 
 
-# /clear
-@router.message(Command("clear"))
-async def cmd_clear(message: Message, state: FSMContext):
-    await state.clear()
-    await message.answer("✅ Стан очищено. Можеш ввести нову команду.")
-
-
-# /search
 @router.message(Command("search"))
 async def cmd_search(message: Message):
     args = message.text.split(maxsplit=1)
+
     if len(args) < 2 or not args[1].strip():
         await message.answer(
             "⚠️ Вкажи нікнейм:\n<code>/search Miracle</code>",
@@ -301,22 +411,30 @@ async def cmd_search(message: Message):
         return
 
     query = args[1].strip()
-    msg = await message.answer(f"🔍 Шукаю <b>{query}</b>...", parse_mode="HTML")
 
-    results = await search_player(query)
+    msg = await message.answer(
+        f"🔍 Шукаю <b>{escape(query)}</b>...",
+        parse_mode="HTML"
+    )
+
+    results = await search_player_fast(query)
 
     if not results:
         await msg.edit_text(ERR_NO_RESULTS, parse_mode="HTML")
         return
 
-    results = await enrich_search_results_with_rank(results)
+    await msg.edit_text(
+        format_search(results),
+        parse_mode="HTML"
+    )
 
-    await msg.edit_text(format_search(results), parse_mode="HTML")
 
-# /match
 @router.message(Command("match"))
 async def cmd_match(message: Message, state: FSMContext):
+    await state.clear()
+
     args = message.text.split(maxsplit=1)
+
     if len(args) < 2:
         await message.answer("🎮 Введіть ID матчу:")
         await state.set_state(SearchState.waiting_for_match)
@@ -347,7 +465,7 @@ async def cmd_match(message: Message, state: FSMContext):
         disable_web_page_preview=True
     )
 
-# Inline — сигнатурні герої
+
 @router.callback_query(F.data.startswith("heroes:"))
 async def cb_heroes(call: CallbackQuery):
     account_id = int(call.data.split(":")[1])
@@ -373,7 +491,6 @@ async def cb_heroes(call: CallbackQuery):
     )
 
 
-# Inline — останні матчі
 @router.callback_query(F.data.startswith("matches:"))
 async def cb_matches(call: CallbackQuery):
     account_id = int(call.data.split(":")[1])
@@ -400,7 +517,6 @@ async def cb_matches(call: CallbackQuery):
     )
 
 
-# Inline — повернутись до статистики
 @router.callback_query(F.data.startswith("stats:"))
 async def cb_stats(call: CallbackQuery):
     account_id = int(call.data.split(":")[1])
