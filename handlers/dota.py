@@ -95,8 +95,6 @@ async def cmd_start(message: Message):
         f"Статистика Dota 2 прямо в Telegram\n\n"
         f"📌 <b>Команди:</b>\n"
         f"/stats <code>ID</code> — статистика гравця\n"
-        f"/heroes <code>ID</code> — сигнатурні герої\n"
-        f"/matches <code>ID</code> — останні матчі\n"
         f"/match <code>ID</code> — деталі конкретного матчу\n"
         f"/search <code>нікнейм</code> — пошук гравця\n\n"
         f"💡 Не знаєш свій ID? Використай /search",
