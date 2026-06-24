@@ -1,8 +1,7 @@
 from html import escape
-from collections import Counter
 from config import (
     BRAND_EMOJI, BRAND_NAME,
-    DOTA_LOGO, SHIELD_EMOJI, MEDAL_MAP,
+    DOTA_LOGO, MEDAL_MAP,
     MAX_HEROES, MAX_MATCHES, HERO_EMOJI
 )
 
@@ -33,6 +32,30 @@ def get_medal(rank_tier: int | None) -> str:
     return f"{medal_emoji} {name} {stars_str}".strip()
 
 
+def get_rank_emoji(rank_tier: int | None) -> str:
+    if rank_tier is None:
+        return ""
+
+    tier = rank_tier // 10
+    stars = rank_tier % 10
+
+    if tier not in MEDAL_MAP:
+        return ""
+
+    name, emoji_id = MEDAL_MAP[tier]
+
+    if emoji_id is None:
+        return ""
+
+    if tier == 8:
+        if stars <= 10:
+            emoji_id = "5195215174503505693"
+        elif stars <= 100:
+            emoji_id = "5194917400125907991"
+
+    return f'<tg-emoji emoji-id="{emoji_id}">🏆</tg-emoji>'
+
+
 def wr_emoji(wr: float) -> str:
     if wr < 45:
         return "🔴"
@@ -50,12 +73,11 @@ def get_hero_emoji(name: str) -> str:
         return f'<tg-emoji emoji-id="{emoji_id}">🎮</tg-emoji>'
     return "🎮"
 
+
 GOLD_EMOJI = '<tg-emoji emoji-id="5364344020183037021">💰</tg-emoji>'
 
 
 def format_match(match: dict, hero_map: dict) -> str:
-    from html import escape
-
     radiant_win = match.get("radiant_win", False)
     duration = match.get("duration", 0)
     mins = duration // 60
@@ -72,7 +94,7 @@ def format_match(match: dict, hero_map: dict) -> str:
         hero_id = p.get("hero_id")
         hero_name = hero_map.get(hero_id, "Unknown")
         hero_e = get_hero_emoji(hero_name)
-        rank = get_medal(p.get("rank_tier"))
+        rank = get_rank_emoji(p.get("rank_tier"))
         k = p.get("kills", 0)
         d = p.get("deaths", 0)
         a = p.get("assists", 0)
@@ -103,6 +125,7 @@ def format_match(match: dict, hero_map: dict) -> str:
         f"\n"
         f"{BRAND_EMOJI} <b>{BRAND_NAME}</b>"
     )
+
 
 def format_player_stats(profile: dict, wl: dict) -> str:
     name = escape(profile.get("profile", {}).get("personaname", "Невідомо"))
