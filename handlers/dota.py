@@ -120,7 +120,7 @@ async def cmd_heroes(message: Message):
         load_heroes()
     )
 
-    if not heroes:
+    if not heroes or all(h.get("games", 0) == 0 for h in heroes):
         await msg.edit_text(
             f"{PRIVATE_MSG}\n\n{BRAND_EMOJI} <b>{BRAND_NAME}</b>",
             parse_mode="HTML",
