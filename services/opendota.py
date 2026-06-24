@@ -42,17 +42,6 @@ async def get_recent_matches(account_id: int) -> Optional[list]:
                 return await r.json()
     return None
 
-
-async def get_role_matches(account_id: int) -> Optional[list]:
-    async with aiohttp.ClientSession() as session:
-        async with session.get(
-            f"{BASE_URL}/players/{account_id}/matches?limit=100&significant=1"
-        ) as r:
-            if r.status == 200:
-                return await r.json()
-    return None
-
-
 async def search_player(query: str) -> Optional[list]:
     async with aiohttp.ClientSession() as session:
         async with session.get(f"{BASE_URL}/search?q={query}") as r:

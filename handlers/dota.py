@@ -6,8 +6,7 @@ from aiogram.filters import Command
 
 from services.opendota import (
     get_player, get_player_wl, get_player_heroes,
-    get_recent_matches, search_player, get_heroes,
-    get_role_matches
+    get_recent_matches, search_player, get_heroes
 )
 from utils.formatters import format_player_stats, format_heroes, format_matches, format_search
 from config import ERR_INVALID_ID, ERR_PLAYER_NOT_FOUND, ERR_API_UNAVAILABLE, ERR_NO_RESULTS, BRAND_EMOJI, BRAND_NAME
