@@ -57,6 +57,22 @@ async def get_cached_stats(account_id: int):
     _stats_cache[account_id] = (result, now)
     return result
 
+async def enrich_search_results_with_rank(results: list) -> list:
+    top_results = results[:5]
+
+    async def enrich(player: dict) -> dict:
+        account_id = player.get("account_id")
+        if not account_id:
+            return player
+
+        full_player = await get_player(int(account_id))
+        if full_player:
+            player["rank_tier"] = full_player.get("rank_tier")
+            player["leaderboard_rank"] = full_player.get("leaderboard_rank")
+
+        return player
+
+    return await asyncio.gather(*(enrich(p) for p in top_results))
 
 def is_private(wl: dict) -> bool:
     return wl.get("win", 0) + wl.get("lose", 0) == 0
@@ -94,6 +110,7 @@ async def cmd_start(message: Message):
         f"━━━━━━━━━━━━━━━\n"
         f"Статистика Dota 2 прямо в Telegram\n\n"
         f"📌 <b>Команди:</b>\n"
+        f"/start — головне меню\n"
         f"/stats <code>ID</code> — статистика гравця\n"
         f"/match <code>ID</code> — деталі конкретного матчу\n"
         f"/search <code>нікнейм</code> — пошук гравця\n\n"
@@ -135,10 +152,14 @@ async def handle_player_query(message: Message, state: FSMContext):
     else:
         msg = await message.answer(f"🔍 Шукаю <b>{escape(query)}</b>...", parse_mode="HTML")
         results = await search_player(query)
-        if not results:
-            await msg.edit_text(ERR_NO_RESULTS, parse_mode="HTML")
-            return
-        await msg.edit_text(format_search(results), parse_mode="HTML")
+
+    if not results:
+        await msg.edit_text(ERR_NO_RESULTS, parse_mode="HTML")
+        return
+
+    results = await enrich_search_results_with_rank(results)
+
+    await msg.edit_text(format_search(results), parse_mode="HTML")
 
 
 @router.message(SearchState.waiting_for_stats)
@@ -287,6 +308,8 @@ async def cmd_search(message: Message):
     if not results:
         await msg.edit_text(ERR_NO_RESULTS, parse_mode="HTML")
         return
+
+    results = await enrich_search_results_with_rank(results)
 
     await msg.edit_text(format_search(results), parse_mode="HTML")
 
