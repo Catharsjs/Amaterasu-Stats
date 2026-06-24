@@ -120,6 +120,12 @@ def get_hero_emoji(name: str) -> str:
     return "🎮"
 
 def format_heroes(heroes: list, hero_map: dict) -> str:
+    heroes = [h for h in heroes if h.get("games", 0) > 0]
+    if not heroes:
+        return (
+            f"<i>Інформація недоступна — гравець вимкнув поширення історії матчів</i>\n\n"
+            f"{BRAND_EMOJI} <b>{BRAND_NAME}</b>"
+        )
     lines = ["<b>Сигнатурні герої:</b>\n━━━━━━━━━━━━━━━"]
     for h in heroes[:MAX_HEROES]:
         name = hero_map.get(h.get("hero_id"), "Невідомо")
