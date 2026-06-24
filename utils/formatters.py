@@ -100,11 +100,18 @@ def format_match(match: dict, hero_map: dict) -> str:
         a = p.get("assists", 0)
         nw = p.get("net_worth", 0)
         account_id = p.get("account_id")
+
+        name_padded = name[:14].ljust(15)
+        kda = f"{k}/{d}/{a}".ljust(9)
+        nw_str = f"{nw:,}"
+
         if account_id:
-            name_str = f'<a href="tg://btn/stats_{account_id}">{name}</a>'
-        else:
-            name_str = name
-        return f"{rank} {name_str} {hero_e} {k}/{d}/{a} {GOLD_EMOJI}{nw:,}"
+            return (
+                f"{rank} {hero_e} <code>{name_padded}{kda}</code>"
+                f'{GOLD_EMOJI}<code>{nw_str}</code> '
+                f'<a href="tg://btn/stats_{account_id}">🔗</a>'
+            )
+        return f"{rank} {hero_e} <code>{name_padded}{kda}</code>{GOLD_EMOJI}<code>{nw_str}</code>"
 
     radiant_label = "Radiant 🏆 Перемога" if radiant_win else "Radiant"
     dire_label = "Dire 🏆 Перемога" if not radiant_win else "Dire"
