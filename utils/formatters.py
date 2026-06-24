@@ -74,7 +74,7 @@ def get_hero_emoji(name: str) -> str:
     return "🎮"
 
 
-GOLD_EMOJI = '<tg-emoji emoji-id="5364344020183037021">💰</tg-emoji>'
+GOLD_EMOJI = '<tg-emoji emoji-id="5364344020183037021">💰 </tg-emoji>'
 
 
 def format_match(match: dict, hero_map: dict) -> str:
@@ -99,7 +99,6 @@ def format_match(match: dict, hero_map: dict) -> str:
         d = p.get("deaths", 0)
         a = p.get("assists", 0)
         nw = p.get("net_worth", 0)
-        account_id = p.get("account_id")
 
         name_padded = name[:14].ljust(15)
         kda = f"{k}/{d}/{a}".ljust(9)

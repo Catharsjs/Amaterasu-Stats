@@ -20,6 +20,7 @@ router = Router()
 class SearchState(StatesGroup):
     waiting_for_query = State()
     waiting_for_match = State()
+    waiting_for_stats = State()
 
 _hero_map: dict = {}
 _stats_cache: dict = {}
@@ -166,23 +167,31 @@ async def handle_match_query(message: Message, state: FSMContext):
 
 # /stats
 @router.message(Command("stats"))
-async def cmd_stats(message: Message):
+async def cmd_stats(message: Message, state: FSMContext):
     args = message.text.split(maxsplit=1)
-    if len(args) < 2 or not args[1].strip().isdigit():
+    if len(args) < 2:
+        await message.answer("👤 Введіть ID або Nickname гравця:")
+        await state.set_state(SearchState.waiting_for_stats)
+        return
+
+    account_id_str = args[1].strip()
+    if not account_id_str.isdigit():
         await message.answer(ERR_INVALID_ID, parse_mode="HTML")
         return
 
-    account_id = int(args[1].strip())
+    account_id = int(account_id_str)
     msg = await message.answer("⏳ Завантажую...")
-
     player, wl = await get_cached_stats(account_id)
 
     if not player or "profile" not in player:
         await msg.edit_text(ERR_PLAYER_NOT_FOUND, parse_mode="HTML")
         return
 
-    text = format_player_stats(player, wl or {})
-    await msg.edit_text(text, parse_mode="HTML", reply_markup=stats_keyboard(account_id))
+    await msg.edit_text(
+        format_player_stats(player, wl or {}),
+        parse_mode="HTML",
+        reply_markup=stats_keyboard(account_id)
+    )
 
 
 # /heroes
@@ -272,9 +281,14 @@ async def cmd_search(message: Message):
 
 # /match
 @router.message(Command("match"))
-async def cmd_match(message: Message):
+async def cmd_match(message: Message, state: FSMContext):
     args = message.text.split(maxsplit=1)
-    if len(args) < 2 or not args[1].strip().isdigit():
+    if len(args) < 2:
+        await message.answer("🎮 Введіть ID матчу:")
+        await state.set_state(SearchState.waiting_for_match)
+        return
+
+    if not args[1].strip().isdigit():
         await message.answer(
             "⚠️ Вкажи ID матчу:\n<code>/match 8863808680</code>",
             parse_mode="HTML"
@@ -290,16 +304,15 @@ async def cmd_match(message: Message):
     )
 
     if not match_data:
-        await msg.edit_text(
-            "❌ Матч не знайдено. Перевір ID.",
-            parse_mode="HTML"
-        )
+        await msg.edit_text("❌ Матч не знайдено. Перевір ID.", parse_mode="HTML")
         return
 
+    text, keyboard = format_match(match_data, hero_map)
     await msg.edit_text(
-        format_match(match_data, hero_map),
+        text,
         parse_mode="HTML",
-        disable_web_page_preview=True
+        disable_web_page_preview=True,
+        reply_markup=keyboard
     )
 
 # Inline — сигнатурні герої
