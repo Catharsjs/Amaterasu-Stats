@@ -105,12 +105,6 @@ def format_match(match: dict, hero_map: dict) -> str:
         kda = f"{k}/{d}/{a}".ljust(9)
         nw_str = f"{nw:,}"
 
-        if account_id:
-            return (
-                f"{rank} {hero_e} <code>{name_padded}{kda}</code>"
-                f'{GOLD_EMOJI}<code>{nw_str}</code> '
-                f'<a href="tg://btn/stats_{account_id}">🔗</a>'
-            )
         return f"{rank} {hero_e} <code>{name_padded}{kda}</code>{GOLD_EMOJI}<code>{nw_str}</code>"
 
     radiant_label = "Radiant 🏆 Перемога" if radiant_win else "Radiant"
