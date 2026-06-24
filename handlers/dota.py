@@ -27,16 +27,21 @@ async def load_heroes() -> dict:
 
 
 async def get_cached_stats(account_id: int):
+    import logging
+    logger = logging.getLogger(__name__)
+    
     now = time.time()
     if account_id in _stats_cache:
         cached, ts = _stats_cache[account_id]
         if now - ts < CACHE_TTL:
+            logger.info(f"Cache hit for {account_id}")
             return cached
 
-    player, wl = await asyncio.gather(
-        get_player(account_id),
-        get_player_wl(account_id),
-    )
+    logger.info(f"Fetching player {account_id}...")
+    player = await get_player(account_id)
+    logger.info(f"Player done: {account_id}")
+    wl = await get_player_wl(account_id)
+    logger.info(f"WL done: {account_id}")
 
     result = (player, wl)
     _stats_cache[account_id] = (result, now)
