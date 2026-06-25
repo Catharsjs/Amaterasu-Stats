@@ -158,7 +158,7 @@ def format_match(match: dict, hero_map: dict) -> str:
 
         return (
             f"{rank} {hero_e} "
-            f"<code>{name_padded}{kda}</code>"
+            f"<code>{name_padded} {kda}</code>"
             f"{GOLD_EMOJI}<code>{nw_str}</code>"
         )
 
