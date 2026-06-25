@@ -108,20 +108,25 @@ def visual_len(text: str) -> int:
     return total
 
 
-def shorten_player_name(name: str, max_width: int = 13) -> str:
+def visual_len(text: str) -> int:
+    total = 0
+
+    for ch in text:
+        if "\u0400" <= ch <= "\u04FF":
+            total += 1
+        else:
+            total += 1
+
+    return total
+
+
+def shorten_player_name(name: str, max_len: int = 18) -> str:
     name = name or "Player"
 
-    if visual_len(name) <= max_width:
-        return name
+    if len(name) <= max_len:
+        return name.ljust(max_len)
 
-    result = ""
-
-    for ch in name:
-        if visual_len(result + ch + "...") > max_width:
-            break
-        result += ch
-
-    return result + "..."
+    return name[:max_len - 3] + "..."
 
 def format_match(match: dict, hero_map: dict) -> str:
     radiant_win = match.get("radiant_win", False)
@@ -136,7 +141,7 @@ def format_match(match: dict, hero_map: dict) -> str:
     dire_players = [p for p in match.get("players", []) if not p.get("isRadiant")]
 
     def format_player(p: dict) -> str:
-        name = shorten_player_name(p.get("personaname") or "Player", max_width=17)
+        name = shorten_player_name(p.get("personaname") or "Player", max_len=18)
         hero_id = p.get("hero_id")
         hero_name = hero_map.get(hero_id, "Unknown")
         hero_e = get_hero_emoji(hero_name)
@@ -147,7 +152,7 @@ def format_match(match: dict, hero_map: dict) -> str:
         a = p.get("assists", 0)
         nw = p.get("net_worth", 0)
 
-        name_padded = code_cell(name, 18)
+        name_padded = escape(name)
         kda = escape(f"{k}/{d}/{a}".ljust(9))
         nw_str = escape(f"{nw:,}")
 
