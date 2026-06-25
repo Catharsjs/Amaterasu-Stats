@@ -96,13 +96,23 @@ def hero_display_name(hero_name: str) -> str:
 GOLD_EMOJI = '<tg-emoji emoji-id="5364344020183037021">💰</tg-emoji> '
 UNCALIBRATED_EMOJI = '<tg-emoji emoji-id="5325699485001619101">🎖</tg-emoji>'
 
-def shorten_player_name(name: str, max_len: int = 15) -> str:
+from wcwidth import wcswidth
+
+
+def shorten_player_name(name: str, max_width: int = 13) -> str:
     name = name or "Player"
 
-    if len(name) <= max_len:
+    if wcswidth(name) <= max_width:
         return name
 
-    return name[:max_len - 3] + "..."
+    result = ""
+
+    for ch in name:
+        if wcswidth(result + ch + "...") > max_width:
+            break
+        result += ch
+
+    return result + "..."
 
 def format_match(match: dict, hero_map: dict) -> str:
     radiant_win = match.get("radiant_win", False)
