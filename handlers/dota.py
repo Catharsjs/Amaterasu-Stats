@@ -215,7 +215,7 @@ def recent_matches_keyboard(
     buttons = [
         InlineKeyboardButton(
             text=str(m.get("match_id")),
-            callback_data=f"om:{m.get('match_id')}",
+            callback_data=f"om:{m.get('match_id')}:{account_id}",
         )
         for m in matches[:8]
         if m.get("match_id")
@@ -242,25 +242,16 @@ def recent_matches_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def match_keyboard(
-    match_id: int,
-    back_account_id: int | None = None,
-) -> InlineKeyboardMarkup:
+def match_keyboard(match_id: int, back_account_id: int | None = None) -> InlineKeyboardMarkup:
     rows = [
         [
-            InlineKeyboardButton(
-                text="Статистика гравця",
-                callback_data=f"mplayers:{match_id}",
-            )
+            InlineKeyboardButton(text="Статистика гравця", callback_data=f"mplayers:{match_id}"),
         ]
     ]
 
     if back_account_id:
         rows.append([
-            InlineKeyboardButton(
-                text="◀️ Назад",
-                callback_data=f"mm:{match_id}:{back_account_id}",
-            )
+            InlineKeyboardButton(text="◀️ Назад", callback_data=f"mm:{match_id}:{back_account_id}"),
         ])
 
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -326,7 +317,7 @@ async def render_match_message(target, match_id: int):
     )
 
 
-async def edit_to_match(call: CallbackQuery, match_id: int):
+async def edit_to_match(call: CallbackQuery, match_id: int, back_account_id: int | None = None):
     match_data, hero_map = await asyncio.gather(
         get_match(match_id),
         load_heroes(),
@@ -340,7 +331,7 @@ async def edit_to_match(call: CallbackQuery, match_id: int):
         format_match(match_data, hero_map),
         parse_mode="HTML",
         disable_web_page_preview=True,
-        reply_markup=match_keyboard(match_id),
+        reply_markup=match_keyboard(match_id, back_account_id),
     )
 
 
@@ -605,9 +596,12 @@ async def handle_match_query(message: Message, state: FSMContext):
 
 @router.callback_query(F.data.startswith("om:"))
 async def cb_open_match(call: CallbackQuery):
-    match_id = int(call.data.split(":")[1])
+    parts = call.data.split(":")
+    match_id = int(parts[1])
+    back_account_id = int(parts[2]) if len(parts) > 2 else None
+
     await call.answer()
-    await edit_to_match(call, match_id)
+    await edit_to_match(call, match_id, back_account_id)
 
 
 @router.callback_query(F.data.startswith("mplayers:"))
