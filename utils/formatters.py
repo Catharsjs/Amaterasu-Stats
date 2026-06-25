@@ -195,9 +195,13 @@ def format_heroes(heroes: list, hero_map: dict) -> str:
             f"{BRAND_EMOJI} <b>{BRAND_NAME}</b>"
         )
 
+    hero_width = HERO_COL
+    games_width = 6
+    wr_width = 6
+
     lines = [
         "<b>Сигнатурні герої:</b>\n",
-        "<code>Герой                 Матчі     WR</code>",
+        f"<code>{'Герой'.ljust(hero_width)}{'Матчі'.rjust(games_width)}   {'WR'.rjust(wr_width)}</code>",
     ]
 
     for h in heroes[:MAX_HEROES]:
@@ -209,13 +213,15 @@ def format_heroes(heroes: list, hero_map: dict) -> str:
         wr = round(wins / games * 100, 1) if games else 0
         indicator = wr_emoji(wr)
 
-        name_padded = code_cell(name, HERO_COL)
-        games_padded = str(games).rjust(5)
-        wr_padded = f"{wr:5.1f}%"
+        name_padded = code_cell(name, hero_width)
+        games_padded = str(games).rjust(games_width)
+        wr_padded = f"{wr:5.1f}%".rjust(wr_width)
 
         lines.append(
             f"{get_hero_emoji(raw_name)} "
-            f"<code>{name_padded}{games_padded}   {indicator} {wr_padded}</code>"
+            f"<code>{name_padded}{games_padded}   </code>"
+            f"{indicator} "
+            f"<code>{wr_padded}</code>"
         )
 
     return "\n\n".join(lines) + f"\n\n{BRAND_EMOJI} <b>{BRAND_NAME}</b>"
