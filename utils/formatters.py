@@ -11,6 +11,16 @@ from config import (
 )
 
 
+HERO_COL = 21
+HERO_NAME_MAX = 20
+
+
+def code_cell(value: str, width: int) -> str:
+    value = str(value or "")
+    value = value[:width]
+    return escape(value.ljust(width))
+
+
 def get_medal(rank_tier: int | None) -> str:
     if rank_tier is None:
         return "Uncalibrated"
@@ -79,17 +89,8 @@ def get_hero_emoji(name: str) -> str:
     return "🎮"
 
 
-def short_hero_name(hero_name: str, max_len: int = 14) -> str:
-    aliases = {
-        "Nature's Prophet": "N. Prophet",
-    }
-
-    name = aliases.get(hero_name, hero_name)
-
-    if len(name) <= max_len:
-        return name
-
-    return name[:max_len]
+def hero_display_name(hero_name: str) -> str:
+    return str(hero_name or "Невідомо")[:HERO_NAME_MAX]
 
 
 GOLD_EMOJI = '<tg-emoji emoji-id="5364344020183037021">💰</tg-emoji> '
@@ -108,7 +109,7 @@ def format_match(match: dict, hero_map: dict) -> str:
     dire_players = [p for p in match.get("players", []) if not p.get("isRadiant")]
 
     def format_player(p: dict) -> str:
-        name = escape(p.get("personaname") or "Player")
+        name = p.get("personaname") or "Player"
         hero_id = p.get("hero_id")
         hero_name = hero_map.get(hero_id, "Unknown")
         hero_e = get_hero_emoji(hero_name)
@@ -119,9 +120,9 @@ def format_match(match: dict, hero_map: dict) -> str:
         a = p.get("assists", 0)
         nw = p.get("net_worth", 0)
 
-        name_padded = name[:14].ljust(15)
-        kda = f"{k}/{d}/{a}".ljust(9)
-        nw_str = f"{nw:,}"
+        name_padded = code_cell(name, 15)
+        kda = escape(f"{k}/{d}/{a}".ljust(9))
+        nw_str = escape(f"{nw:,}")
 
         return (
             f"{rank} {hero_e} "
@@ -198,14 +199,14 @@ def format_heroes(heroes: list, hero_map: dict) -> str:
 
     for h in heroes[:MAX_HEROES]:
         raw_name = hero_map.get(h.get("hero_id"), "Невідомо")
-        name = escape(short_hero_name(raw_name, 16))
+        name = hero_display_name(raw_name)
 
         games = h.get("games", 0)
         wins = h.get("win", 0)
         wr = round(wins / games * 100, 1) if games else 0
         indicator = wr_emoji(wr)
 
-        name_padded = name[:16].ljust(17)
+        name_padded = code_cell(name, HERO_COL)
         games_padded = str(games).rjust(4)
 
         lines.append(
@@ -221,9 +222,8 @@ def format_matches(matches: list, hero_map: dict) -> str:
 
     for m in matches[:MAX_MATCHES]:
         raw_hero = hero_map.get(m.get("hero_id"), "Невідомо")
-
+        hero_name = hero_display_name(raw_hero)
         hero_emoji = get_hero_emoji(raw_hero)
-        hero_name = escape(short_hero_name(raw_hero, 14))
 
         won = m.get("radiant_win") == (m.get("player_slot", 0) < 128)
         result = "✅" if won else "❌"
@@ -232,14 +232,14 @@ def format_matches(matches: list, hero_map: dict) -> str:
         mins = m.get("duration", 0) // 60
         match_id = m.get("match_id")
 
-        hero_padded = hero_name[:14].ljust(15)
-        kda_padded = kda.ljust(9)
-        mins_padded = f"{mins}хв".rjust(5)
+        hero_padded = code_cell(hero_name, HERO_COL)
+        kda_padded = escape(kda.ljust(9))
+        mins_padded = escape(f"{mins}хв".rjust(5))
 
         lines.append(
             f"{result} {hero_emoji} "
             f"<code>{hero_padded}{kda_padded}{mins_padded}</code>  "
-            f"<a href='https://www.opendota.com/matches/{match_id}'>{match_id}</a>"
+            f'<a href="https://www.opendota.com/matches/{match_id}">{match_id}</a>'
         )
 
     return "\n\n".join(lines) + f"\n\n{BRAND_EMOJI} <b>{BRAND_NAME}</b>"
@@ -249,12 +249,12 @@ def format_search(results: list) -> str:
     lines = ["<b>Результати пошуку:</b>\n━━━━━━━━━━━━━━━"]
 
     for p in results[:5]:
-        name = escape(p.get("personaname") or "Невідомо")
+        name = p.get("personaname") or "Невідомо"
         account_id = str(p.get("account_id") or "—")
         rank = get_medal(p.get("rank_tier"))
 
-        name_padded = name[:16].ljust(17)
-        id_padded = account_id.rjust(10)
+        name_padded = code_cell(name, 17)
+        id_padded = escape(account_id.rjust(10))
 
         lines.append(
             f"👤 <code>{name_padded}{id_padded}</code>  {rank}"
