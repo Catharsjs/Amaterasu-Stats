@@ -16,6 +16,7 @@ from services.opendota import (
     search_player,
     get_heroes,
     get_match,
+    OpenDotaBusyError,
 )
 from utils.formatters import (
     format_player_stats,
@@ -147,7 +148,10 @@ async def search_player_fast(query: str) -> list:
         if now - ts < SEARCH_CACHE_TTL:
             return cached
 
-    results = await search_player(query)
+    try:
+        results = await search_player(query)
+    except OpenDotaBusyError:
+        raise
 
     if not results:
         return []
@@ -300,13 +304,24 @@ def match_players_keyboard(match_id: int, match_data: dict, team: str) -> Inline
 async def render_match_message(target, match_id: int):
     msg = await target.answer("⏳ Завантажую матч...")
 
-    match_data, hero_map = await asyncio.gather(
-        get_match(match_id),
-        load_heroes(),
-    )
+    try:
+        match_data, hero_map = await asyncio.gather(
+            get_match(match_id),
+            load_heroes(),
+        )
+    except OpenDotaBusyError:
+        await msg.edit_text(
+            "⚠️ OpenDota зараз перевантажена.\n\n"
+            "Спробуйте ще раз через кілька секунд.",
+            parse_mode="HTML",
+        )
+        return
 
     if not match_data:
-        await msg.edit_text("❌ Матч не знайдено. Перевір ID.", parse_mode="HTML")
+        await msg.edit_text(
+            "❌ Матч не знайдено. Перевір ID.",
+            parse_mode="HTML",
+        )
         return
 
     await msg.edit_text(
@@ -318,13 +333,24 @@ async def render_match_message(target, match_id: int):
 
 
 async def edit_to_match(call: CallbackQuery, match_id: int, back_account_id: int | None = None):
-    match_data, hero_map = await asyncio.gather(
-        get_match(match_id),
-        load_heroes(),
-    )
+    try:
+        match_data, hero_map = await asyncio.gather(
+            get_match(match_id),
+            load_heroes(),
+        )
+    except OpenDotaBusyError:
+        await call.message.edit_text(
+            "⚠️ OpenDota зараз перевантажена.\n\n"
+            "Спробуйте ще раз через кілька секунд.",
+            parse_mode="HTML",
+        )
+        return
 
     if not match_data:
-        await call.message.edit_text("❌ Матч не знайдено.", parse_mode="HTML")
+        await call.message.edit_text(
+            "❌ Матч не знайдено.",
+            parse_mode="HTML",
+        )
         return
 
     await call.message.edit_text(
@@ -334,9 +360,16 @@ async def edit_to_match(call: CallbackQuery, match_id: int, back_account_id: int
         reply_markup=match_keyboard(match_id, back_account_id),
     )
 
-
 async def edit_to_player_stats(call: CallbackQuery, account_id: int, match_id: int | None = None):
-    player, wl = await get_cached_stats(account_id)
+    try:
+        player, wl = await get_cached_stats(account_id)
+    except OpenDotaBusyError:
+        await call.message.edit_text(
+            "⚠️ OpenDota зараз перевантажена.\n\n"
+            "Спробуйте ще раз через кілька секунд.",
+            parse_mode="HTML",
+        )
+        return
 
     if not player or "profile" not in player:
         await call.message.edit_text(ERR_PLAYER_NOT_FOUND, parse_mode="HTML")
@@ -347,7 +380,6 @@ async def edit_to_player_stats(call: CallbackQuery, account_id: int, match_id: i
         parse_mode="HTML",
         reply_markup=stats_keyboard(account_id, match_id),
     )
-
 
 @router.message(Command("start"))
 async def cmd_start(message: Message, state: FSMContext):
@@ -361,15 +393,15 @@ async def cmd_start(message: Message, state: FSMContext):
     ])
 
     await message.answer(
-        f'<tg-emoji emoji-id="5321247751399316518">⚛️</tg-emoji> <b>Amaterasu Esports Stats</b>\n'
-        f"━━━━━━━━━━━━━━━\n"
-        f"Статистика Dota 2 прямо в Telegram\n\n"
-        f"📌 <b>Команди:</b>\n"
-        f"/start — головне меню\n"
-        f"/stats <code>ID</code> — статистика гравця\n"
-        f"/match <code>ID</code> — деталі конкретного матчу\n"
-        f"/search <code>нікнейм</code> — пошук гравця\n\n"
-        f"💡 Сигнатурні герої та останні матчі доступні зі сторінки гравця",
+        '<tg-emoji emoji-id="5321247751399316518">⚛️</tg-emoji> <b>Amaterasu Esports Stats</b>\n'
+        "━━━━━━━━━━━━━━━\n"
+        "Статистика Dota 2 прямо в Telegram\n\n"
+        "📌 <b>Команди:</b>\n"
+        "/start — головне меню\n"
+        "/stats <code>ID</code> — статистика гравця\n"
+        "/match <code>ID</code> — деталі конкретного матчу\n"
+        "/search <code>нікнейм</code> — пошук гравця\n\n"
+        "💡 Сигнатурні герої та останні матчі доступні зі сторінки гравця",
         parse_mode="HTML",
         reply_markup=keyboard,
     )
@@ -395,7 +427,15 @@ async def cmd_stats(message: Message, state: FSMContext):
     account_id = int(query)
     msg = await message.answer("⏳ Завантажую...")
 
-    player, wl = await get_cached_stats(account_id)
+    try:
+        player, wl = await get_cached_stats(account_id)
+    except OpenDotaBusyError:
+        await msg.edit_text(
+            "⚠️ OpenDota зараз перевантажена.\n\n"
+            "Спробуйте ще раз через кілька секунд.",
+            parse_mode="HTML",
+        )
+        return
 
     if not player or "profile" not in player:
         await msg.edit_text(ERR_PLAYER_NOT_FOUND, parse_mode="HTML")
@@ -489,7 +529,15 @@ async def cmd_search(message: Message):
         parse_mode="HTML",
     )
 
-    results = await search_player_fast(query)
+    try:
+        results = await search_player_fast(query)
+    except OpenDotaBusyError:
+        await msg.edit_text(
+            "⚠️ OpenDota зараз перевантажена.\n\n"
+            "Спробуйте ще раз через кілька секунд.",
+            parse_mode="HTML",
+        )
+        return
 
     if not results:
         await msg.edit_text(ERR_NO_RESULTS, parse_mode="HTML")
@@ -546,7 +594,15 @@ async def handle_player_query(message: Message, state: FSMContext):
         account_id = int(query)
         msg = await message.answer("⏳ Завантажую...")
 
-        player, wl = await get_cached_stats(account_id)
+        try:
+            player, wl = await get_cached_stats(account_id)
+        except OpenDotaBusyError:
+            await msg.edit_text(
+                "⚠️ OpenDota зараз перевантажена.\n\n"
+                "Спробуйте ще раз через кілька секунд.",
+                parse_mode="HTML",
+            )
+            return
 
         if not player or "profile" not in player:
             await msg.edit_text(ERR_PLAYER_NOT_FOUND, parse_mode="HTML")
@@ -564,7 +620,15 @@ async def handle_player_query(message: Message, state: FSMContext):
         parse_mode="HTML",
     )
 
-    results = await search_player_fast(query)
+    try:
+        results = await search_player_fast(query)
+    except OpenDotaBusyError:
+        await msg.edit_text(
+            "⚠️ OpenDota зараз перевантажена.\n\n"
+            "Спробуйте ще раз через кілька секунд.",
+            parse_mode="HTML",
+        )
+        return
 
     if not results:
         await msg.edit_text(ERR_NO_RESULTS, parse_mode="HTML")
