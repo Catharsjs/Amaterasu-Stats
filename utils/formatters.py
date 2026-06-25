@@ -81,7 +81,7 @@ def get_hero_emoji(name: str) -> str:
 
 def short_hero_name(hero_name: str, max_len: int = 14) -> str:
     aliases = {
-        "Nature's Prophet": "Nature's Prophet",
+        "Nature's Prophet": "N. Prophet",
     }
 
     name = aliases.get(hero_name, hero_name)
@@ -179,7 +179,7 @@ def format_player_stats(profile: dict, wl: dict) -> str:
         f"\n"
         f"Ранк: {rank}{mmr_str}\n"
         f"\n"
-        f"{total} матчів ({wr_emoji(winrate)} {winrate}% Вінрейт)\n"
+        f"{total} матчів ({winrate}% Вінрейт)\n"
         f"\n"
         f"{BRAND_EMOJI} <b>{BRAND_NAME}</b>"
     )
@@ -223,7 +223,7 @@ def format_matches(matches: list, hero_map: dict) -> str:
         raw_hero = hero_map.get(m.get("hero_id"), "Невідомо")
 
         hero_emoji = get_hero_emoji(raw_hero)
-        hero_name = escape(short_hero_name(raw_hero, 16))
+        hero_name = escape(short_hero_name(raw_hero, 14))
 
         won = m.get("radiant_win") == (m.get("player_slot", 0) < 128)
         result = "✅" if won else "❌"
@@ -232,7 +232,7 @@ def format_matches(matches: list, hero_map: dict) -> str:
         mins = m.get("duration", 0) // 60
         match_id = m.get("match_id")
 
-        hero_padded = hero_name[:16].ljust(17)
+        hero_padded = hero_name[:14].ljust(15)
         kda_padded = kda.ljust(9)
         mins_padded = f"{mins}хв".rjust(5)
 
