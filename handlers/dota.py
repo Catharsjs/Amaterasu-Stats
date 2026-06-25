@@ -87,10 +87,7 @@ async def load_heroes() -> dict:
     if not _hero_map:
         heroes = await get_heroes()
         if heroes:
-            _hero_map = {
-                h["id"]: h["localized_name"]
-                for h in heroes
-            }
+            _hero_map = {h["id"]: h["localized_name"] for h in heroes}
 
     return _hero_map
 
@@ -176,20 +173,11 @@ def stats_keyboard(account_id: int, match_id: int | None = None) -> InlineKeyboa
     if match_id:
         return InlineKeyboardMarkup(inline_keyboard=[
             [
-                InlineKeyboardButton(
-                    text="Сигнатурні герої",
-                    callback_data=f"mh:{match_id}:{account_id}",
-                ),
-                InlineKeyboardButton(
-                    text="Останні матчі",
-                    callback_data=f"mm:{match_id}:{account_id}",
-                ),
+                InlineKeyboardButton(text="Сигнатурні герої", callback_data=f"mh:{match_id}:{account_id}"),
+                InlineKeyboardButton(text="Останні матчі", callback_data=f"mm:{match_id}:{account_id}"),
             ],
             [
-                InlineKeyboardButton(
-                    text="◀️ До матчу",
-                    callback_data=f"mb:{match_id}",
-                ),
+                InlineKeyboardButton(text="◀️ До матчу", callback_data=f"mb:{match_id}"),
             ],
         ])
 
@@ -212,21 +200,52 @@ def back_keyboard(account_id: int) -> InlineKeyboardMarkup:
 def back_to_player_keyboard(match_id: int, account_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(
-                text="◀️ До гравця",
-                callback_data=f"mp:{match_id}:{account_id}",
-            ),
+            InlineKeyboardButton(text="◀️ До гравця", callback_data=f"mp:{match_id}:{account_id}"),
         ]
     ])
+
+
+def recent_matches_keyboard(
+    matches: list,
+    account_id: int,
+    source_match_id: int | None = None,
+) -> InlineKeyboardMarkup:
+    rows = []
+
+    buttons = [
+        InlineKeyboardButton(
+            text=str(m.get("match_id")),
+            callback_data=f"om:{m.get('match_id')}",
+        )
+        for m in matches[:8]
+        if m.get("match_id")
+    ]
+
+    for i in range(0, len(buttons), 2):
+        rows.append(buttons[i:i + 2])
+
+    if source_match_id:
+        rows.append([
+            InlineKeyboardButton(
+                text="◀️ До гравця",
+                callback_data=f"mp:{source_match_id}:{account_id}",
+            )
+        ])
+    else:
+        rows.append([
+            InlineKeyboardButton(
+                text="◀️ Повернутись",
+                callback_data=f"stats:{account_id}",
+            )
+        ])
+
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def match_keyboard(match_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(
-                text="Статистика гравця",
-                callback_data=f"mplayers:{match_id}",
-            ),
+            InlineKeyboardButton(text="Статистика гравця", callback_data=f"mplayers:{match_id}"),
         ]
     ])
 
@@ -265,10 +284,7 @@ def match_players_keyboard(match_id: int, match_data: dict, team: str) -> Inline
         ])
 
     rows.append([
-        InlineKeyboardButton(
-            text="◀️ Назад",
-            callback_data=f"mplayers:{match_id}",
-        )
+        InlineKeyboardButton(text="◀️ Назад", callback_data=f"mplayers:{match_id}")
     ])
 
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -444,7 +460,7 @@ async def cmd_matches(message: Message):
         format_matches(matches, hero_map),
         parse_mode="HTML",
         disable_web_page_preview=True,
-        reply_markup=back_keyboard(account_id),
+        reply_markup=recent_matches_keyboard(matches, account_id),
     )
 
 
@@ -472,10 +488,7 @@ async def cmd_search(message: Message):
         await msg.edit_text(ERR_NO_RESULTS, parse_mode="HTML")
         return
 
-    await msg.edit_text(
-        format_search(results),
-        parse_mode="HTML",
-    )
+    await msg.edit_text(format_search(results), parse_mode="HTML")
 
 
 @router.message(Command("match"))
@@ -550,10 +563,7 @@ async def handle_player_query(message: Message, state: FSMContext):
         await msg.edit_text(ERR_NO_RESULTS, parse_mode="HTML")
         return
 
-    await msg.edit_text(
-        format_search(results),
-        parse_mode="HTML",
-    )
+    await msg.edit_text(format_search(results), parse_mode="HTML")
 
 
 @router.message(SearchState.waiting_for_stats)
@@ -575,6 +585,13 @@ async def handle_match_query(message: Message, state: FSMContext):
         return
 
     await render_match_message(message, int(query))
+
+
+@router.callback_query(F.data.startswith("om:"))
+async def cb_open_match(call: CallbackQuery):
+    match_id = int(call.data.split(":")[1])
+    await call.answer()
+    await edit_to_match(call, match_id)
 
 
 @router.callback_query(F.data.startswith("mplayers:"))
@@ -675,7 +692,7 @@ async def cb_match_player_matches(call: CallbackQuery):
         format_matches(matches, hero_map),
         parse_mode="HTML",
         disable_web_page_preview=True,
-        reply_markup=back_to_player_keyboard(match_id, account_id),
+        reply_markup=recent_matches_keyboard(matches, account_id, match_id),
     )
 
 
@@ -726,7 +743,7 @@ async def cb_matches(call: CallbackQuery):
         format_matches(matches, hero_map),
         parse_mode="HTML",
         disable_web_page_preview=True,
-        reply_markup=back_keyboard(account_id),
+        reply_markup=recent_matches_keyboard(matches, account_id),
     )
 
 
