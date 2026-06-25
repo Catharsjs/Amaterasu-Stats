@@ -195,7 +195,10 @@ def format_heroes(heroes: list, hero_map: dict) -> str:
             f"{BRAND_EMOJI} <b>{BRAND_NAME}</b>"
         )
 
-    lines = ["<b>Сигнатурні герої:</b>\n━━━━━━━━━━━━━━━"]
+    lines = [
+        "<b>Сигнатурні герої:</b>\n",
+        "<code>Герой                 Матчі     WR</code>",
+    ]
 
     for h in heroes[:MAX_HEROES]:
         raw_name = hero_map.get(h.get("hero_id"), "Невідомо")
@@ -207,18 +210,19 @@ def format_heroes(heroes: list, hero_map: dict) -> str:
         indicator = wr_emoji(wr)
 
         name_padded = code_cell(name, HERO_COL)
-        games_padded = str(games).rjust(4)
+        games_padded = str(games).rjust(5)
+        wr_padded = f"{wr:5.1f}%"
 
         lines.append(
             f"{get_hero_emoji(raw_name)} "
-            f"<code>{name_padded}{games_padded} матчів  {indicator}{wr:5.1f}%</code>"
+            f"<code>{name_padded}{games_padded}   {indicator} {wr_padded}</code>"
         )
 
     return "\n\n".join(lines) + f"\n\n{BRAND_EMOJI} <b>{BRAND_NAME}</b>"
 
 
 def format_matches(matches: list, hero_map: dict) -> str:
-    lines = ["<b>Останні матчі:</b>\n━━━━━━━━━━━━━━━"]
+    lines = ["<b>Останні матчі:</b>\n"]
 
     for m in matches[:MAX_MATCHES]:
         raw_hero = hero_map.get(m.get("hero_id"), "Невідомо")
