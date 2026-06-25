@@ -200,7 +200,7 @@ def format_heroes(heroes: list, hero_map: dict) -> str:
     wr_width = 6
 
     header = (
-        f"     "
+        f"       "
         f"<code>{'Герой'.ljust(hero_width)}"
         f"{'Матчі'.rjust(games_width)}   "
         f"{'WR'.rjust(wr_width)}</code>"
