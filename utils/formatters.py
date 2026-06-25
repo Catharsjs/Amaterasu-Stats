@@ -136,7 +136,7 @@ def format_match(match: dict, hero_map: dict) -> str:
     dire_players = [p for p in match.get("players", []) if not p.get("isRadiant")]
 
     def format_player(p: dict) -> str:
-        name = shorten_player_name(p.get("personaname") or "Player")
+        name = shorten_player_name(p.get("personaname") or "Player", max_width=17)
         hero_id = p.get("hero_id")
         hero_name = hero_map.get(hero_id, "Unknown")
         hero_e = get_hero_emoji(hero_name)
@@ -147,7 +147,7 @@ def format_match(match: dict, hero_map: dict) -> str:
         a = p.get("assists", 0)
         nw = p.get("net_worth", 0)
 
-        name_padded = code_cell(name, 15)
+        name_padded = code_cell(name, 18)
         kda = escape(f"{k}/{d}/{a}".ljust(9))
         nw_str = escape(f"{nw:,}")
 
