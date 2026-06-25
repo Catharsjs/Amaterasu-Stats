@@ -195,15 +195,28 @@ def format_heroes(heroes: list, hero_map: dict) -> str:
             f"{BRAND_EMOJI} <b>{BRAND_NAME}</b>"
         )
 
-    hero_width = HERO_COL
-    games_width = 6
-    wr_width = 6
+    shown_heroes = heroes[:MAX_HEROES]
+
+    names = [
+        hero_display_name(hero_map.get(h.get("hero_id"), "Невідомо"))
+        for h in shown_heroes
+    ]
+
+    hero_width = min(
+        max(len(name) for name in names) + 2,
+        HERO_COL
+    )
+
+    games_width = max(
+        len("Матчі"),
+        max(len(str(h.get("games", 0))) for h in shown_heroes)
+    )
 
     header = (
-        f"         "
+        f"      "
         f"<code>{'Герой'.ljust(hero_width)}"
-        f"{'Матчі'.rjust(games_width)}   "
-        f"{'WR'.rjust(wr_width)}</code>"
+        f"{'Матчі'.rjust(games_width)} "
+        f"{'WR'.rjust(6)}</code>"
     )
 
     lines = [
@@ -211,9 +224,8 @@ def format_heroes(heroes: list, hero_map: dict) -> str:
         header,
     ]
 
-    for h in heroes[:MAX_HEROES]:
+    for h, name in zip(shown_heroes, names):
         raw_name = hero_map.get(h.get("hero_id"), "Невідомо")
-        name = hero_display_name(raw_name)
 
         games = h.get("games", 0)
         wins = h.get("win", 0)
@@ -222,13 +234,12 @@ def format_heroes(heroes: list, hero_map: dict) -> str:
 
         name_padded = code_cell(name, hero_width)
         games_padded = str(games).rjust(games_width)
-        wr_padded = f"{wr:5.1f}%".rjust(wr_width)
+        wr_padded = f"{wr:5.1f}%"
 
         lines.append(
             f"{get_hero_emoji(raw_name)} "
-            f"<code>{name_padded}{games_padded}   </code>"
-            f"{indicator} "
-            f"<code>{wr_padded}</code>"
+            f"<code>{name_padded}{games_padded} </code>"
+            f"{indicator}<code>{wr_padded}</code>"
         )
 
     return "\n\n".join(lines) + f"\n\n{BRAND_EMOJI} <b>{BRAND_NAME}</b>"
