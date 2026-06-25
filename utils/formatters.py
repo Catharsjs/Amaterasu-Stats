@@ -1,737 +1,263 @@
-import asyncio
-import time
 from html import escape
 
-from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.filters import Command
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
-
-from services.opendota import (
-    get_player,
-    get_player_wl,
-    get_player_heroes,
-    get_recent_matches,
-    search_player,
-    get_heroes,
-    get_match,
-)
-from utils.formatters import (
-    format_player_stats,
-    format_heroes,
-    format_matches,
-    format_search,
-    format_match,
-)
 from config import (
-    ERR_INVALID_ID,
-    ERR_PLAYER_NOT_FOUND,
-    ERR_NO_RESULTS,
     BRAND_EMOJI,
     BRAND_NAME,
-)
-
-router = Router()
-
-
-class SearchState(StatesGroup):
-    waiting_for_query = State()
-    waiting_for_match = State()
-    waiting_for_stats = State()
-
-
-_hero_map: dict = {}
-_stats_cache: dict = {}
-_search_cache: dict = {}
-
-CACHE_TTL = 600
-SEARCH_CACHE_TTL = 600
-
-
-def normalize_name(value: str) -> str:
-    return (value or "").strip().lower()
-
-
-def short_player_name(name: str, max_len: int = 28) -> str:
-    name = name or "Player"
-    return name if len(name) <= max_len else name[: max_len - 1] + "…"
-
-
-def rank_search_results(results: list, query: str) -> list:
-    q = normalize_name(query)
-
-    def score(player: dict) -> tuple:
-        name = normalize_name(player.get("personaname"))
-
-        if name == q:
-            return (0, name)
-        if name.startswith(q):
-            return (1, name)
-        if q in name:
-            return (2, name)
-
-        return (3, name)
-
-    filtered = [
-        player for player in results
-        if q in normalize_name(player.get("personaname"))
-    ]
-
-    return sorted(filtered, key=score)[:5]
-
-
-async def load_heroes() -> dict:
-    global _hero_map
-
-    if not _hero_map:
-        heroes = await get_heroes()
-        if heroes:
-            _hero_map = {
-                h["id"]: h["localized_name"]
-                for h in heroes
-            }
-
-    return _hero_map
-
-
-async def get_cached_stats(account_id: int):
-    import logging
-    logger = logging.getLogger(__name__)
-
-    now = time.time()
-
-    if account_id in _stats_cache:
-        cached, ts = _stats_cache[account_id]
-        if now - ts < CACHE_TTL:
-            logger.info(f"Cache hit for {account_id}")
-            return cached
-
-    logger.info(f"Fetching player stats {account_id}...")
-
-    player, wl = await asyncio.gather(
-        get_player(account_id),
-        get_player_wl(account_id),
-    )
-
-    logger.info(f"Player stats done: {account_id}")
-
-    result = (player, wl)
-    _stats_cache[account_id] = (result, now)
-
-    return result
-
-
-async def enrich_search_results_with_rank(results: list) -> list:
-    top_results = results[:5]
-
-    async def enrich(player: dict) -> dict:
-        account_id = player.get("account_id")
-        if not account_id:
-            return player
-
-        player_data, _ = await get_cached_stats(int(account_id))
-
-        if player_data:
-            player["rank_tier"] = player_data.get("rank_tier")
-            player["leaderboard_rank"] = player_data.get("leaderboard_rank")
-
-        return player
-
-    return await asyncio.gather(*(enrich(player) for player in top_results))
-
-
-async def search_player_fast(query: str) -> list:
-    now = time.time()
-    cache_key = normalize_name(query)
-
-    if cache_key in _search_cache:
-        cached, ts = _search_cache[cache_key]
-        if now - ts < SEARCH_CACHE_TTL:
-            return cached
-
-    results = await search_player(query)
-
-    if not results:
-        return []
-
-    results = rank_search_results(results, query)
-
-    if not results:
-        return []
-
-    results = await enrich_search_results_with_rank(results)
-
-    _search_cache[cache_key] = (results, now)
-
-    return results
-
-
-PRIVATE_MSG = (
-    "ℹ️ <i>Інформація недоступна — гравець вимкнув поширення історії матчів</i>"
+    DOTA_LOGO,
+    MEDAL_MAP,
+    MAX_HEROES,
+    MAX_MATCHES,
+    HERO_EMOJI,
 )
 
 
-def stats_keyboard(account_id: int, match_id: int | None = None) -> InlineKeyboardMarkup:
-    if match_id:
-        return InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="Сигнатурні герої",
-                    callback_data=f"mh:{match_id}:{account_id}",
-                ),
-                InlineKeyboardButton(
-                    text="Останні матчі",
-                    callback_data=f"mm:{match_id}:{account_id}",
-                ),
-            ],
-            [
-                InlineKeyboardButton(
-                    text="◀️ До матчу",
-                    callback_data=f"mb:{match_id}",
-                ),
-            ],
-        ])
-
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="Сигнатурні герої", callback_data=f"heroes:{account_id}"),
-            InlineKeyboardButton(text="Останні матчі", callback_data=f"matches:{account_id}"),
-        ]
-    ])
+HERO_COL = 21
+HERO_NAME_MAX = 20
 
 
-def back_keyboard(account_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="◀️ Повернутись", callback_data=f"stats:{account_id}"),
-        ]
-    ])
+def code_cell(value: str, width: int) -> str:
+    value = str(value or "")
+    value = value[:width]
+    return escape(value.ljust(width))
 
 
-def back_to_player_keyboard(match_id: int, account_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(
-                text="◀️ До гравця",
-                callback_data=f"mp:{match_id}:{account_id}",
-            ),
-        ]
-    ])
+def get_medal(rank_tier: int | None) -> str:
+    if rank_tier is None:
+        return "Uncalibrated"
+
+    tier = rank_tier // 10
+    stars = rank_tier % 10
+
+    if tier not in MEDAL_MAP:
+        return "Невідомо"
+
+    name, emoji_id = MEDAL_MAP[tier]
+
+    if emoji_id is None:
+        return name
+
+    if tier == 8:
+        if stars <= 10:
+            emoji_id = "5195215174503505693"
+        elif stars <= 100:
+            emoji_id = "5194917400125907991"
+
+    medal_emoji = f'<tg-emoji emoji-id="{emoji_id}">🏆</tg-emoji>'
+    return f"{medal_emoji} {name}".strip()
 
 
-def match_keyboard(match_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(
-                text="Статистика гравця",
-                callback_data=f"mplayers:{match_id}",
-            ),
-        ]
-    ])
+def get_rank_emoji(rank_tier: int | None) -> str:
+    if rank_tier is None:
+        return ""
+
+    tier = rank_tier // 10
+    stars = rank_tier % 10
+
+    if tier not in MEDAL_MAP:
+        return ""
+
+    name, emoji_id = MEDAL_MAP[tier]
+
+    if emoji_id is None:
+        return ""
+
+    if tier == 8:
+        if stars <= 10:
+            emoji_id = "5195215174503505693"
+        elif stars <= 100:
+            emoji_id = "5194917400125907991"
+
+    return f'<tg-emoji emoji-id="{emoji_id}">🏆</tg-emoji>'
 
 
-def match_team_keyboard(match_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="Radiant", callback_data=f"mteam:{match_id}:r"),
-            InlineKeyboardButton(text="Dire", callback_data=f"mteam:{match_id}:d"),
-        ],
-        [
-            InlineKeyboardButton(text="◀️ Назад", callback_data=f"mb:{match_id}"),
-        ],
-    ])
+def wr_emoji(wr: float) -> str:
+    if wr < 45:
+        return "🔴"
+    if wr < 50:
+        return "🟠"
+    if wr < 55:
+        return "🟢"
+    return "🟣"
 
 
-def match_players_keyboard(match_id: int, match_data: dict, team: str) -> InlineKeyboardMarkup:
-    is_radiant = team == "r"
+def get_hero_emoji(name: str) -> str:
+    emoji_id = HERO_EMOJI.get(name)
 
-    players = [
-        p for p in match_data.get("players", [])
-        if bool(p.get("isRadiant")) == is_radiant and p.get("account_id")
-    ]
+    if emoji_id:
+        return f'<tg-emoji emoji-id="{emoji_id}">🎮</tg-emoji>'
 
-    rows = []
+    return "🎮"
 
-    for p in players[:5]:
-        account_id = int(p.get("account_id"))
-        name = short_player_name(p.get("personaname") or f"ID {account_id}")
 
-        rows.append([
-            InlineKeyboardButton(
-                text=name,
-                callback_data=f"mp:{match_id}:{account_id}",
-            )
-        ])
+def hero_display_name(hero_name: str) -> str:
+    return str(hero_name or "Невідомо")[:HERO_NAME_MAX]
 
-    rows.append([
-        InlineKeyboardButton(
-            text="◀️ Назад",
-            callback_data=f"mplayers:{match_id}",
+
+GOLD_EMOJI = '<tg-emoji emoji-id="5364344020183037021">💰</tg-emoji> '
+
+
+def format_match(match: dict, hero_map: dict) -> str:
+    radiant_win = match.get("radiant_win", False)
+    duration = match.get("duration", 0)
+    mins = duration // 60
+    secs = duration % 60
+    match_id = match.get("match_id")
+    radiant_score = match.get("radiant_score", 0)
+    dire_score = match.get("dire_score", 0)
+
+    radiant_players = [p for p in match.get("players", []) if p.get("isRadiant")]
+    dire_players = [p for p in match.get("players", []) if not p.get("isRadiant")]
+
+    def format_player(p: dict) -> str:
+        name = p.get("personaname") or "Player"
+        hero_id = p.get("hero_id")
+        hero_name = hero_map.get(hero_id, "Unknown")
+        hero_e = get_hero_emoji(hero_name)
+        rank = get_rank_emoji(p.get("rank_tier"))
+
+        k = p.get("kills", 0)
+        d = p.get("deaths", 0)
+        a = p.get("assists", 0)
+        nw = p.get("net_worth", 0)
+
+        name_padded = code_cell(name, 15)
+        kda = escape(f"{k}/{d}/{a}".ljust(9))
+        nw_str = escape(f"{nw:,}")
+
+        return (
+            f"{rank} {hero_e} "
+            f"<code>{name_padded}{kda}</code>"
+            f"{GOLD_EMOJI}<code>{nw_str}</code>"
         )
-    ])
 
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+    radiant_label = "Radiant 🏆 Перемога" if radiant_win else "Radiant"
+    dire_label = "Dire 🏆 Перемога" if not radiant_win else "Dire"
 
+    radiant_lines = "\n".join(format_player(p) for p in radiant_players)
+    dire_lines = "\n".join(format_player(p) for p in dire_players)
 
-async def render_match_message(target, match_id: int):
-    msg = await target.answer("⏳ Завантажую матч...")
-
-    match_data, hero_map = await asyncio.gather(
-        get_match(match_id),
-        load_heroes(),
-    )
-
-    if not match_data:
-        await msg.edit_text("❌ Матч не знайдено. Перевір ID.", parse_mode="HTML")
-        return
-
-    await msg.edit_text(
-        format_match(match_data, hero_map),
-        parse_mode="HTML",
-        disable_web_page_preview=True,
-        reply_markup=match_keyboard(match_id),
+    return (
+        f"<b>Рахунок:</b> {radiant_score} : {dire_score}\n"
+        f"<b>Тривалість:</b> {mins:02d}:{secs:02d}\n"
+        f"<b>ID матчу:</b> <code>{match_id}</code>\n"
+        f"\n"
+        f"<b>{radiant_label}</b>\n"
+        f"{radiant_lines}\n"
+        f"\n"
+        f"<b>{dire_label}</b>\n"
+        f"{dire_lines}\n"
+        f"\n"
+        f"{BRAND_EMOJI} <b>{BRAND_NAME}</b>"
     )
 
 
-async def edit_to_match(call: CallbackQuery, match_id: int):
-    match_data, hero_map = await asyncio.gather(
-        get_match(match_id),
-        load_heroes(),
-    )
+def format_player_stats(profile: dict, wl: dict) -> str:
+    name = escape(profile.get("profile", {}).get("personaname", "Невідомо"))
+    rank_tier = profile.get("rank_tier")
+    rank = get_medal(rank_tier)
+    mmr = profile.get("mmr_estimate", {}).get("estimate")
 
-    if not match_data:
-        await call.message.edit_text("❌ Матч не знайдено.", parse_mode="HTML")
-        return
+    wins = wl.get("win", 0)
+    losses = wl.get("lose", 0)
+    total = wins + losses
+    winrate = round(wins / total * 100, 1) if total else 0
 
-    await call.message.edit_text(
-        format_match(match_data, hero_map),
-        parse_mode="HTML",
-        disable_web_page_preview=True,
-        reply_markup=match_keyboard(match_id),
-    )
+    mmr_str = f" ({mmr} MMR)" if mmr else ""
 
-
-async def edit_to_player_stats(call: CallbackQuery, account_id: int, match_id: int | None = None):
-    player, wl = await get_cached_stats(account_id)
-
-    if not player or "profile" not in player:
-        await call.message.edit_text(ERR_PLAYER_NOT_FOUND, parse_mode="HTML")
-        return
-
-    await call.message.edit_text(
-        format_player_stats(player, wl or {}),
-        parse_mode="HTML",
-        reply_markup=stats_keyboard(account_id, match_id),
-    )
-
-
-@router.message(Command("start"))
-async def cmd_start(message: Message, state: FSMContext):
-    await state.clear()
-
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="🔍 Шукати гравця", callback_data="prompt_player"),
-            InlineKeyboardButton(text="🎮 Шукати матч", callback_data="prompt_match"),
-        ]
-    ])
-
-    await message.answer(
-        f'<tg-emoji emoji-id="5321247751399316518">⚛️</tg-emoji> <b>Amaterasu Esports Stats</b>\n'
-        f"━━━━━━━━━━━━━━━\n"
-        f"Статистика Dota 2 прямо в Telegram\n\n"
-        f"📌 <b>Команди:</b>\n"
-        f"/start — головне меню\n"
-        f"/stats <code>ID</code> — статистика гравця\n"
-        f"/match <code>ID</code> — деталі конкретного матчу\n"
-        f"/search <code>нікнейм</code> — пошук гравця\n\n"
-        f"💡 Сигнатурні герої та останні матчі доступні зі сторінки гравця",
-        parse_mode="HTML",
-        reply_markup=keyboard,
-    )
-
-
-@router.message(Command("stats"))
-async def cmd_stats(message: Message, state: FSMContext):
-    await state.clear()
-
-    args = message.text.split(maxsplit=1)
-
-    if len(args) < 2:
-        await message.answer("👤 Введіть ID або Nickname гравця:")
-        await state.set_state(SearchState.waiting_for_stats)
-        return
-
-    query = args[1].strip()
-
-    if not query.isdigit():
-        await message.answer(ERR_INVALID_ID, parse_mode="HTML")
-        return
-
-    account_id = int(query)
-    msg = await message.answer("⏳ Завантажую...")
-
-    player, wl = await get_cached_stats(account_id)
-
-    if not player or "profile" not in player:
-        await msg.edit_text(ERR_PLAYER_NOT_FOUND, parse_mode="HTML")
-        return
-
-    await msg.edit_text(
-        format_player_stats(player, wl or {}),
-        parse_mode="HTML",
-        reply_markup=stats_keyboard(account_id),
-    )
-
-
-@router.message(Command("heroes"))
-async def cmd_heroes(message: Message):
-    args = message.text.split(maxsplit=1)
-
-    if len(args) < 2 or not args[1].strip().isdigit():
-        await message.answer(ERR_INVALID_ID, parse_mode="HTML")
-        return
-
-    account_id = int(args[1].strip())
-    msg = await message.answer("⏳ Завантажую...")
-
-    heroes, hero_map = await asyncio.gather(
-        get_player_heroes(account_id),
-        load_heroes(),
-    )
-
-    if not heroes or all(h.get("games", 0) == 0 for h in heroes):
-        await msg.edit_text(
-            f"{PRIVATE_MSG}\n\n{BRAND_EMOJI} <b>{BRAND_NAME}</b>",
-            parse_mode="HTML",
-            reply_markup=back_keyboard(account_id),
+    if total == 0:
+        return (
+            f"{DOTA_LOGO} <b>{name}</b>\n"
+            f"\n"
+            f"Ранк: {rank}{mmr_str}\n"
+            f"\n"
+            f"<i>Інформація недоступна — гравець вимкнув поширення історії матчів</i>\n"
+            f"\n"
+            f"{BRAND_EMOJI} <b>{BRAND_NAME}</b>"
         )
-        return
 
-    await msg.edit_text(
-        format_heroes(heroes, hero_map),
-        parse_mode="HTML",
-        reply_markup=back_keyboard(account_id),
+    return (
+        f"{DOTA_LOGO} <b>{name}</b>\n"
+        f"\n"
+        f"Ранк: {rank}{mmr_str}\n"
+        f"\n"
+        f"{total} матчів ({winrate}% Вінрейт)\n"
+        f"\n"
+        f"{BRAND_EMOJI} <b>{BRAND_NAME}</b>"
     )
 
 
-@router.message(Command("matches"))
-async def cmd_matches(message: Message):
-    args = message.text.split(maxsplit=1)
+def format_heroes(heroes: list, hero_map: dict) -> str:
+    heroes = [h for h in heroes if h.get("games", 0) > 0]
 
-    if len(args) < 2 or not args[1].strip().isdigit():
-        await message.answer(ERR_INVALID_ID, parse_mode="HTML")
-        return
-
-    account_id = int(args[1].strip())
-    msg = await message.answer("⏳ Завантажую...")
-
-    matches, hero_map = await asyncio.gather(
-        get_recent_matches(account_id),
-        load_heroes(),
-    )
-
-    if not matches:
-        await msg.edit_text(
-            f"{PRIVATE_MSG}\n\n{BRAND_EMOJI} <b>{BRAND_NAME}</b>",
-            parse_mode="HTML",
-            reply_markup=back_keyboard(account_id),
+    if not heroes:
+        return (
+            f"<i>Інформація недоступна — гравець вимкнув поширення історії матчів</i>\n\n"
+            f"{BRAND_EMOJI} <b>{BRAND_NAME}</b>"
         )
-        return
 
-    await msg.edit_text(
-        format_matches(matches, hero_map),
-        parse_mode="HTML",
-        disable_web_page_preview=True,
-        reply_markup=back_keyboard(account_id),
-    )
+    lines = ["<b>Сигнатурні герої:</b>\n━━━━━━━━━━━━━━━"]
 
+    for h in heroes[:MAX_HEROES]:
+        raw_name = hero_map.get(h.get("hero_id"), "Невідомо")
+        name = hero_display_name(raw_name)
 
-@router.message(Command("search"))
-async def cmd_search(message: Message):
-    args = message.text.split(maxsplit=1)
+        games = h.get("games", 0)
+        wins = h.get("win", 0)
+        wr = round(wins / games * 100, 1) if games else 0
+        indicator = wr_emoji(wr)
 
-    if len(args) < 2 or not args[1].strip():
-        await message.answer(
-            "⚠️ Вкажи нікнейм:\n<code>/search Miracle</code>",
-            parse_mode="HTML",
+        name_padded = code_cell(name, HERO_COL)
+        games_padded = str(games).rjust(4)
+
+        lines.append(
+            f"{get_hero_emoji(raw_name)} "
+            f"<code>{name_padded}{games_padded} матчів  {indicator}{wr:5.1f}%</code>"
         )
-        return
 
-    query = args[1].strip()
-
-    msg = await message.answer(
-        f"🔍 Шукаю <b>{escape(query)}</b>...",
-        parse_mode="HTML",
-    )
-
-    results = await search_player_fast(query)
-
-    if not results:
-        await msg.edit_text(ERR_NO_RESULTS, parse_mode="HTML")
-        return
-
-    await msg.edit_text(
-        format_search(results),
-        parse_mode="HTML",
-    )
+    return "\n\n".join(lines) + f"\n\n{BRAND_EMOJI} <b>{BRAND_NAME}</b>"
 
 
-@router.message(Command("match"))
-async def cmd_match(message: Message, state: FSMContext):
-    await state.clear()
+def format_matches(matches: list, hero_map: dict) -> str:
+    lines = ["<b>Останні матчі:</b>\n━━━━━━━━━━━━━━━"]
 
-    args = message.text.split(maxsplit=1)
+    for m in matches[:MAX_MATCHES]:
+        raw_hero = hero_map.get(m.get("hero_id"), "Невідомо")
+        hero_name = hero_display_name(raw_hero)
+        hero_emoji = get_hero_emoji(raw_hero)
 
-    if len(args) < 2:
-        await message.answer("🎮 Введіть ID матчу:")
-        await state.set_state(SearchState.waiting_for_match)
-        return
+        won = m.get("radiant_win") == (m.get("player_slot", 0) < 128)
+        result = "✅" if won else "❌"
 
-    if not args[1].strip().isdigit():
-        await message.answer(
-            "⚠️ Вкажи ID матчу:\n<code>/match 8863808680</code>",
-            parse_mode="HTML",
+        kda = f"{m.get('kills', 0)}/{m.get('deaths', 0)}/{m.get('assists', 0)}"
+        mins = m.get("duration", 0) // 60
+        match_id = m.get("match_id")
+
+        hero_padded = code_cell(hero_name, HERO_COL)
+        kda_padded = escape(kda.ljust(9))
+        mins_padded = escape(f"{mins}хв".rjust(5))
+
+        lines.append(
+            f"{result} {hero_emoji} "
+            f"<code>{hero_padded}{kda_padded}{mins_padded}</code>  "
+            f'<a href="https://www.opendota.com/matches/{match_id}">{match_id}</a>'
         )
-        return
 
-    await render_match_message(message, int(args[1].strip()))
-
-
-@router.callback_query(F.data == "prompt_player")
-async def cb_prompt_player(call: CallbackQuery, state: FSMContext):
-    await call.answer()
-    await call.message.answer("👤 Введіть ID або Nickname гравця:")
-    await state.set_state(SearchState.waiting_for_query)
+    return "\n\n".join(lines) + f"\n\n{BRAND_EMOJI} <b>{BRAND_NAME}</b>"
 
 
-@router.callback_query(F.data == "prompt_match")
-async def cb_prompt_match(call: CallbackQuery, state: FSMContext):
-    await call.answer()
-    await call.message.answer("🎮 Введіть ID матчу:")
-    await state.set_state(SearchState.waiting_for_match)
+def format_search(results: list) -> str:
+    lines = ["<b>Результати пошуку:</b>\n━━━━━━━━━━━━━━━"]
 
+    for p in results[:5]:
+        name = p.get("personaname") or "Невідомо"
+        account_id = str(p.get("account_id") or "—")
+        rank = get_medal(p.get("rank_tier"))
 
-@router.message(SearchState.waiting_for_query)
-async def handle_player_query(message: Message, state: FSMContext):
-    query = message.text.strip()
+        name_padded = code_cell(name, 17)
+        id_padded = escape(account_id.rjust(10))
 
-    if query.startswith("/"):
-        return
-
-    await state.clear()
-
-    if query.isdigit():
-        account_id = int(query)
-        msg = await message.answer("⏳ Завантажую...")
-
-        player, wl = await get_cached_stats(account_id)
-
-        if not player or "profile" not in player:
-            await msg.edit_text(ERR_PLAYER_NOT_FOUND, parse_mode="HTML")
-            return
-
-        await msg.edit_text(
-            format_player_stats(player, wl or {}),
-            parse_mode="HTML",
-            reply_markup=stats_keyboard(account_id),
+        lines.append(
+            f"👤 <code>{name_padded}{id_padded}</code>  {rank}"
         )
-        return
 
-    msg = await message.answer(
-        f"🔍 Шукаю <b>{escape(query)}</b>...",
-        parse_mode="HTML",
-    )
-
-    results = await search_player_fast(query)
-
-    if not results:
-        await msg.edit_text(ERR_NO_RESULTS, parse_mode="HTML")
-        return
-
-    await msg.edit_text(
-        format_search(results),
-        parse_mode="HTML",
-    )
-
-
-@router.message(SearchState.waiting_for_stats)
-async def handle_stats_query(message: Message, state: FSMContext):
-    await handle_player_query(message, state)
-
-
-@router.message(SearchState.waiting_for_match)
-async def handle_match_query(message: Message, state: FSMContext):
-    query = message.text.strip()
-
-    if query.startswith("/"):
-        return
-
-    await state.clear()
-
-    if not query.isdigit():
-        await message.answer("⚠️ ID матчу має бути числом", parse_mode="HTML")
-        return
-
-    await render_match_message(message, int(query))
-
-
-@router.callback_query(F.data.startswith("mplayers:"))
-async def cb_match_players_menu(call: CallbackQuery):
-    match_id = int(call.data.split(":")[1])
-    await call.answer()
-
-    await call.message.edit_reply_markup(
-        reply_markup=match_team_keyboard(match_id),
-    )
-
-
-@router.callback_query(F.data.startswith("mteam:"))
-async def cb_match_team(call: CallbackQuery):
-    _, match_id_str, team = call.data.split(":")
-    match_id = int(match_id_str)
-
-    await call.answer()
-
-    match_data = await get_match(match_id)
-
-    if not match_data:
-        await call.message.edit_text("❌ Матч не знайдено.", parse_mode="HTML")
-        return
-
-    await call.message.edit_reply_markup(
-        reply_markup=match_players_keyboard(match_id, match_data, team),
-    )
-
-
-@router.callback_query(F.data.startswith("mb:"))
-async def cb_back_to_match(call: CallbackQuery):
-    match_id = int(call.data.split(":")[1])
-    await call.answer()
-    await edit_to_match(call, match_id)
-
-
-@router.callback_query(F.data.startswith("mp:"))
-async def cb_match_player_stats(call: CallbackQuery):
-    _, match_id_str, account_id_str = call.data.split(":")
-    match_id = int(match_id_str)
-    account_id = int(account_id_str)
-
-    await call.answer()
-    await edit_to_player_stats(call, account_id, match_id)
-
-
-@router.callback_query(F.data.startswith("mh:"))
-async def cb_match_player_heroes(call: CallbackQuery):
-    _, match_id_str, account_id_str = call.data.split(":")
-    match_id = int(match_id_str)
-    account_id = int(account_id_str)
-
-    await call.answer()
-
-    heroes, hero_map = await asyncio.gather(
-        get_player_heroes(account_id),
-        load_heroes(),
-    )
-
-    if not heroes or all(h.get("games", 0) == 0 for h in heroes):
-        await call.message.edit_text(
-            f"{PRIVATE_MSG}\n\n{BRAND_EMOJI} <b>{BRAND_NAME}</b>",
-            parse_mode="HTML",
-            reply_markup=back_to_player_keyboard(match_id, account_id),
-        )
-        return
-
-    await call.message.edit_text(
-        format_heroes(heroes, hero_map),
-        parse_mode="HTML",
-        reply_markup=back_to_player_keyboard(match_id, account_id),
-    )
-
-
-@router.callback_query(F.data.startswith("mm:"))
-async def cb_match_player_matches(call: CallbackQuery):
-    _, match_id_str, account_id_str = call.data.split(":")
-    match_id = int(match_id_str)
-    account_id = int(account_id_str)
-
-    await call.answer()
-
-    matches, hero_map = await asyncio.gather(
-        get_recent_matches(account_id),
-        load_heroes(),
-    )
-
-    if not matches:
-        await call.message.edit_text(
-            f"{PRIVATE_MSG}\n\n{BRAND_EMOJI} <b>{BRAND_NAME}</b>",
-            parse_mode="HTML",
-            reply_markup=back_to_player_keyboard(match_id, account_id),
-        )
-        return
-
-    await call.message.edit_text(
-        format_matches(matches, hero_map),
-        parse_mode="HTML",
-        disable_web_page_preview=True,
-        reply_markup=back_to_player_keyboard(match_id, account_id),
-    )
-
-
-@router.callback_query(F.data.startswith("heroes:"))
-async def cb_heroes(call: CallbackQuery):
-    account_id = int(call.data.split(":")[1])
-    await call.answer()
-
-    heroes, hero_map = await asyncio.gather(
-        get_player_heroes(account_id),
-        load_heroes(),
-    )
-
-    if not heroes or all(h.get("games", 0) == 0 for h in heroes):
-        await call.message.edit_text(
-            f"{PRIVATE_MSG}\n\n{BRAND_EMOJI} <b>{BRAND_NAME}</b>",
-            parse_mode="HTML",
-            reply_markup=back_keyboard(account_id),
-        )
-        return
-
-    await call.message.edit_text(
-        format_heroes(heroes, hero_map),
-        parse_mode="HTML",
-        reply_markup=back_keyboard(account_id),
-    )
-
-
-@router.callback_query(F.data.startswith("matches:"))
-async def cb_matches(call: CallbackQuery):
-    account_id = int(call.data.split(":")[1])
-    await call.answer()
-
-    matches, hero_map = await asyncio.gather(
-        get_recent_matches(account_id),
-        load_heroes(),
-    )
-
-    if not matches:
-        await call.message.edit_text(
-            f"{PRIVATE_MSG}\n\n{BRAND_EMOJI} <b>{BRAND_NAME}</b>",
-            parse_mode="HTML",
-            reply_markup=back_keyboard(account_id),
-        )
-        return
-
-    await call.message.edit_text(
-        format_matches(matches, hero_map),
-        parse_mode="HTML",
-        disable_web_page_preview=True,
-        reply_markup=back_keyboard(account_id),
-    )
-
-
-@router.callback_query(F.data.startswith("stats:"))
-async def cb_stats(call: CallbackQuery):
-    account_id = int(call.data.split(":")[1])
-    await call.answer()
-    await edit_to_player_stats(call, account_id)
+    return "\n\n".join(lines) + f"\n\n{BRAND_EMOJI} <b>{BRAND_NAME}</b>"
