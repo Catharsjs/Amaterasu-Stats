@@ -96,6 +96,14 @@ def hero_display_name(hero_name: str) -> str:
 GOLD_EMOJI = '<tg-emoji emoji-id="5364344020183037021">💰</tg-emoji> '
 UNCALIBRATED_EMOJI = '<tg-emoji emoji-id="5325699485001619101">🎖</tg-emoji>'
 
+def shorten_player_name(name: str, max_len: int = 15) -> str:
+    name = name or "Player"
+
+    if len(name) <= max_len:
+        return name
+
+    return name[:max_len - 3] + "..."
+
 def format_match(match: dict, hero_map: dict) -> str:
     radiant_win = match.get("radiant_win", False)
     duration = match.get("duration", 0)
@@ -109,7 +117,7 @@ def format_match(match: dict, hero_map: dict) -> str:
     dire_players = [p for p in match.get("players", []) if not p.get("isRadiant")]
 
     def format_player(p: dict) -> str:
-        name = p.get("personaname") or "Player"
+        name = shorten_player_name(p.get("personaname") or "Player")
         hero_id = p.get("hero_id")
         hero_name = hero_map.get(hero_id, "Unknown")
         hero_e = get_hero_emoji(hero_name)
