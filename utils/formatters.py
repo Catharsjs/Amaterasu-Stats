@@ -23,18 +23,18 @@ def code_cell(value: str, width: int) -> str:
 
 def get_medal(rank_tier: int | None) -> str:
     if rank_tier is None:
-        return "Uncalibrated"
+        return f"{UNCALIBRATED_EMOJI} Uncalibrated"
 
     tier = rank_tier // 10
     stars = rank_tier % 10
 
     if tier not in MEDAL_MAP:
-        return "Невідомо"
+        return f"{UNCALIBRATED_EMOJI} Uncalibrated"
 
     name, emoji_id = MEDAL_MAP[tier]
 
     if emoji_id is None:
-        return name
+        return f"{UNCALIBRATED_EMOJI} {name}"
 
     if tier == 8:
         if stars <= 10:
@@ -48,18 +48,18 @@ def get_medal(rank_tier: int | None) -> str:
 
 def get_rank_emoji(rank_tier: int | None) -> str:
     if rank_tier is None:
-        return ""
+        return UNCALIBRATED_EMOJI
 
     tier = rank_tier // 10
     stars = rank_tier % 10
 
     if tier not in MEDAL_MAP:
-        return ""
+        return UNCALIBRATED_EMOJI
 
     name, emoji_id = MEDAL_MAP[tier]
 
     if emoji_id is None:
-        return ""
+        return UNCALIBRATED_EMOJI
 
     if tier == 8:
         if stars <= 10:
@@ -94,7 +94,7 @@ def hero_display_name(hero_name: str) -> str:
 
 
 GOLD_EMOJI = '<tg-emoji emoji-id="5364344020183037021">💰</tg-emoji> '
-
+UNCALIBRATED_EMOJI = '<tg-emoji emoji-id="5325699485001619101">🎖</tg-emoji>'
 
 def format_match(match: dict, hero_map: dict) -> str:
     radiant_win = match.get("radiant_win", False)
