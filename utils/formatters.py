@@ -199,9 +199,16 @@ def format_heroes(heroes: list, hero_map: dict) -> str:
     games_width = 6
     wr_width = 6
 
+    header = (
+        f"     "
+        f"<code>{'Герой'.ljust(hero_width)}"
+        f"{'Матчі'.rjust(games_width)}   "
+        f"{'WR'.rjust(wr_width)}</code>"
+    )
+
     lines = [
         "<b>Сигнатурні герої:</b>\n",
-        f"<code>{'Герой'.ljust(hero_width)}{'Матчі'.rjust(games_width)}   {'WR'.rjust(wr_width)}</code>",
+        header,
     ]
 
     for h in heroes[:MAX_HEROES]:
