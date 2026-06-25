@@ -242,12 +242,28 @@ def recent_matches_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def match_keyboard(match_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
+def match_keyboard(
+    match_id: int,
+    back_account_id: int | None = None,
+) -> InlineKeyboardMarkup:
+    rows = [
         [
-            InlineKeyboardButton(text="Статистика гравця", callback_data=f"mplayers:{match_id}"),
+            InlineKeyboardButton(
+                text="Статистика гравця",
+                callback_data=f"mplayers:{match_id}",
+            )
         ]
-    ])
+    ]
+
+    if back_account_id:
+        rows.append([
+            InlineKeyboardButton(
+                text="◀️ Назад",
+                callback_data=f"mm:{match_id}:{back_account_id}",
+            )
+        ])
+
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def match_team_keyboard(match_id: int) -> InlineKeyboardMarkup:
