@@ -96,19 +96,28 @@ def hero_display_name(hero_name: str) -> str:
 GOLD_EMOJI = '<tg-emoji emoji-id="5364344020183037021">💰</tg-emoji> '
 UNCALIBRATED_EMOJI = '<tg-emoji emoji-id="5325699485001619101">🎖</tg-emoji>'
 
-from wcwidth import wcswidth
+def visual_len(text: str) -> int:
+    total = 0
+
+    for ch in text:
+        if "\u0400" <= ch <= "\u04FF":  # кирилиця
+            total += 2
+        else:
+            total += 1
+
+    return total
 
 
 def shorten_player_name(name: str, max_width: int = 13) -> str:
     name = name or "Player"
 
-    if wcswidth(name) <= max_width:
+    if visual_len(name) <= max_width:
         return name
 
     result = ""
 
     for ch in name:
-        if wcswidth(result + ch + "...") > max_width:
+        if visual_len(result + ch + "...") > max_width:
             break
         result += ch
 
